@@ -1,0 +1,24 @@
+{
+  "name": "pi-agent-stuff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal Pi package with utility extensions, reusable skills, prompts, and tmux subagents work-in-progress.",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": [
+      "./pi-extension/notify-finished/index.ts",
+      "./pi-extension/session-changed-files/index.ts"
+    ],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}

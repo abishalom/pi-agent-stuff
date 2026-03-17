@@ -1,0 +1,25 @@
+node_modules/
+.npm/
+dist/
+build/
+coverage/
+.tmp/
+tmp/
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local Pi/runtime state
+.pi/
+.pixi/
+.npmrc.local
+
+# Local sessions, auth, and machine-specific artifacts
+sessions/
+auth.json
+settings.local.json

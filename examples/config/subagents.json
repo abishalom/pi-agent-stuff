@@ -1,0 +1,25 @@
+{
+  "backend": "tmux",
+  "layout": {
+    "defaultSplit": "right",
+    "interactiveFocus": true,
+    "autoClose": true,
+    "setPaneTitle": true,
+    "renameWindow": true
+  },
+  "limits": {
+    "maxNestingDepth": 3,
+    "maxActiveSubagents": 6
+  },
+  "plan": {
+    "enableScout": true,
+    "enableReviewer": true,
+    "sequentialWorkers": true,
+    "autoFixCriticalReviewFindings": true
+  },
+  "extensions": {
+    "mode": "allow-all",
+    "allow": [],
+    "deny": []
+  }
+}
