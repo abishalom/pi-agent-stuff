@@ -50,7 +50,7 @@ pi install /home/ashalom/Github/pi_agent_stuff
 Or test it for one run only:
 
 ```bash
-pi -e /home/ashalom/Github/pi_agent_stuff
+pi -e /home/ashalom/Github/pi-agent-stuff
 ```
 
 ## Install from git later

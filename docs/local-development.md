@@ -15,7 +15,7 @@ Do not treat `~/.pi/agent/extensions/` as the long-term source of truth.
 For day-to-day development:
 
 ```bash
-pi install /home/ashalom/Github/pi_agent_stuff
+pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
 For one-off testing without changing settings:

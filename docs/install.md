@@ -13,7 +13,7 @@ pi install /home/ashalom/Github/pi_agent_stuff
 Load it for a single run:
 
 ```bash
-pi -e /home/ashalom/Github/pi_agent_stuff
+pi -e /home/ashalom/Github/pi-agent-stuff
 ```
 
 ## Git install
