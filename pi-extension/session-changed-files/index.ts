@@ -190,22 +190,24 @@ function formatSummary(theme: Theme, stats: Map<string, FileStats>): string[] {
 }
 
 function formatReport(theme: Theme, stats: Map<string, FileStats>, width: number): string[] {
+	const safeWidth = Math.max(1, width);
 	const total = totals(stats);
 	const files = sortedFiles(stats);
 	const rows: string[] = [];
-	rows.push(theme.fg("accent", `Changed this session: ${total.files} file${total.files === 1 ? "" : "s"}`));
-	rows.push(`${theme.fg("success", `+${total.added}`)} ${theme.fg("error", `-${total.removed}`)}`);
+	rows.push(truncateToWidth(theme.fg("accent", `Changed this session: ${total.files} file${total.files === 1 ? "" : "s"}`), safeWidth));
+	rows.push(truncateToWidth(`${theme.fg("success", `+${total.added}`)} ${theme.fg("error", `-${total.removed}`)}`, safeWidth));
 	rows.push("");
 
 	if (files.length === 0) {
-		rows.push(theme.fg("dim", "No write/edit changes recorded yet."));
+		rows.push(truncateToWidth(theme.fg("dim", "No write/edit changes recorded yet."), safeWidth));
 		return rows;
 	}
 
 	const kindWidth = Math.max(3, ...files.map((file) => (file.kind === "modified" ? 3 : file.kind.length)));
 	const plusWidth = Math.max(2, ...files.map((file) => String(file.added).length + 1));
 	const minusWidth = Math.max(2, ...files.map((file) => String(file.removed).length + 1));
-	const pathWidth = Math.max(10, width - kindWidth - plusWidth - minusWidth - 6);
+	const fixedWidth = kindWidth + plusWidth + minusWidth + 3;
+	const fullRowPathWidth = safeWidth - fixedWidth;
 
 	for (const file of files) {
 		const kindLabel = file.kind === "modified" ? "mod" : file.kind;
@@ -214,8 +216,17 @@ function formatReport(theme: Theme, stats: Map<string, FileStats>, width: number
 		const kind = theme.fg(kindColor, kindLabel.padEnd(kindWidth, " "));
 		const plus = theme.fg("success", `+${String(file.added).padStart(plusWidth - 1, " ")}`);
 		const minus = theme.fg("error", `-${String(file.removed).padStart(minusWidth - 1, " ")}`);
-		const filePath = theme.fg(pathColor, truncateToWidth(file.path, pathWidth));
-		rows.push(`${kind} ${plus} ${minus} ${filePath}`);
+
+		if (fullRowPathWidth >= 8) {
+			const filePath = theme.fg(pathColor, truncateToWidth(file.path, fullRowPathWidth));
+			rows.push(truncateToWidth(`${kind} ${plus} ${minus} ${filePath}`, safeWidth));
+			continue;
+		}
+
+		const summary = truncateToWidth(`${kindLabel} +${file.added} -${file.removed}`, safeWidth);
+		const filePath = truncateToWidth(theme.fg(pathColor, file.path), safeWidth);
+		rows.push(summary);
+		rows.push(filePath);
 	}
 
 	return rows;
@@ -235,13 +246,13 @@ class ChangedFilesReportOverlay {
 	}
 
 	render(width: number): string[] {
-		const innerWidth = Math.max(40, width - 2);
-		const body = formatReport(this.theme, this.stats, innerWidth - 2).map((line) => truncateToWidth(line, innerWidth));
-		const lines = [
+		const innerWidth = Math.max(1, width - 2);
+		const header = truncateToWidth(
 			`${this.theme.fg("accent", "Session changed files")} ${this.theme.fg("dim", "(Esc to close)")}`,
-			"",
-			...body,
-		];
+			innerWidth,
+		);
+		const body = formatReport(this.theme, this.stats, innerWidth).map((line) => truncateToWidth(line, innerWidth));
+		const lines = [header, "", ...body];
 		const padded = lines.map((line) => line + " ".repeat(Math.max(0, innerWidth - visibleWidth(line))));
 		return [
 			this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
@@ -379,19 +390,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 	pi.registerCommand("changed-files", {
 		description: "Show files changed by write/edit tools in this session",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			await ctx.ui.custom<void>(
-				(_tui, theme, _kb, done) => new ChangedFilesReportOverlay(theme, fileStats, done),
-				{
-					overlay: true,
-					overlayOptions: {
-						anchor: "center",
-						width: "70%",
-						minWidth: 60,
-						maxHeight: "80%",
-						margin: 2,
-					},
-				},
-			);
+			await ctx.ui.custom<void>((_tui, theme, _kb, done) => new ChangedFilesReportOverlay(theme, fileStats, done));
 		},
 	});
 
