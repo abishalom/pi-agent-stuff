@@ -165,25 +165,39 @@ function sortedFiles(stats: Map<string, FileStats>): FileStats[] {
 	});
 }
 
-function formatSummary(theme: Theme, stats: Map<string, FileStats>): string[] {
+function formatSummary(theme: Theme, stats: Map<string, FileStats>, width: number): string[] {
+	const safeWidth = Math.max(1, width);
 	const total = totals(stats);
 	if (total.files === 0) {
-		return [theme.fg("dim", "Changed this session: none")];
+		return [truncateToWidth(theme.fg("dim", "Changed this session: none"), safeWidth)];
 	}
 
 	const lines = [
-		`${theme.fg("accent", "Changed this session")} ${theme.fg("dim", `${total.files} file${total.files === 1 ? "" : "s"}`)} ${theme.fg("success", `+${total.added}`)} ${theme.fg("error", `-${total.removed}`)}`,
+		truncateToWidth(
+			`${theme.fg("accent", "Changed this session")} ${theme.fg("dim", `${total.files} file${total.files === 1 ? "" : "s"}`)} ${theme.fg("success", `+${total.added}`)} ${theme.fg("error", `-${total.removed}`)}`,
+			safeWidth,
+		),
 	];
 
 	for (const file of sortedFiles(stats).slice(0, 6)) {
+		const labelText = file.kind === "new" ? "new" : file.kind === "deleted" ? "deleted" : "mod";
 		const label =
 			file.kind === "new"
-				? theme.fg("success", "new")
+				? theme.fg("success", labelText)
 				: file.kind === "deleted"
-					? theme.fg("error", "deleted")
-					: theme.fg("dim", "mod");
+					? theme.fg("error", labelText)
+					: theme.fg("dim", labelText);
 		const pathColor = file.kind === "new" ? "success" : file.kind === "deleted" ? "error" : "text";
-		lines.push(`${label} ${theme.fg(pathColor, file.path)} ${theme.fg("success", `+${file.added}`)} ${theme.fg("error", `-${file.removed}`)}`);
+		const suffix = `${theme.fg("success", `+${file.added}`)} ${theme.fg("error", `-${file.removed}`)}`;
+		const reserved = visibleWidth(label) + 1 + 1 + visibleWidth(suffix);
+		const availableForPath = safeWidth - reserved;
+		const pathText = availableForPath >= 4
+			? theme.fg(pathColor, truncateToWidth(file.path, availableForPath))
+			: theme.fg(pathColor, truncateToWidth(file.path, safeWidth));
+		const line = availableForPath >= 4
+			? `${label} ${pathText} ${suffix}`
+			: `${label} ${pathText}`;
+		lines.push(truncateToWidth(line, safeWidth));
 	}
 
 	return lines;
@@ -279,7 +293,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 				: `${ctx.ui.theme.fg("accent", `Changed: ${total.files}`)} ${ctx.ui.theme.fg("success", `+${total.added}`)} ${ctx.ui.theme.fg("error", `-${total.removed}`)}`,
 		);
 		ctx.ui.setWidget(STATUS_KEY, (_tui, theme) => ({
-			render: () => formatSummary(theme, fileStats),
+			render: (width: number) => formatSummary(theme, fileStats, width),
 			invalidate: () => {},
 		}));
 	};
