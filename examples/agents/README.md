@@ -1,7 +1,12 @@
-# Example agent overrides
+# Agent override examples
 
-Put project-local agent overrides in `.pi/agents/`.
+This repo does not use local agent markdown overrides by default.
 
-Put global agent overrides in `~/.pi/agent/agents/`.
+Why:
+- upstream `pi-interactive-subagents` owns the bundled prompts
+- copying agent markdown files locally would also shadow prompt updates
 
-This folder can hold shareable examples without affecting the package's default bundled agents.
+For this repo, prefer changing only:
+- `config/subagent-model-overrides.json`
+
+Use `.pi/agents/*.md` or `~/.pi/agent/agents/*.md` only if you intentionally want to fork prompt content.

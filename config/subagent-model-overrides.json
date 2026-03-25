@@ -1,0 +1,22 @@
+{
+  "planner": {
+    "model": "openai-codex/gpt-5.4",
+    "thinking": "high"
+  },
+  "scout": {
+    "model": "openai-codex/gpt-5.4-mini",
+    "thinking": "minimal"
+  },
+  "worker": {
+    "model": "openai-codex/gpt-5.4",
+    "thinking": "medium"
+  },
+  "reviewer": {
+    "model": "openai-codex/gpt-5.4",
+    "thinking": "high"
+  },
+  "visual-tester": {
+    "model": "openai-codex/gpt-5.4",
+    "thinking": "low"
+  }
+}

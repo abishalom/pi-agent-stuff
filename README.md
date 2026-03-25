@@ -1,77 +1,121 @@
 # pi-agent-stuff
 
-Personal Pi package for reusable extensions, skills, prompts, and tmux subagents work.
+Personal Pi package with utility extensions, reusable prompts and skills, and an upstream-backed subagents setup.
 
-## What is in this repo
+## What this package includes
 
-### Stable package-managed resources
-- `pi-extension/notify-finished` — long-running prompt notifications
-- `pi-extension/session-changed-files` — track files changed during a Pi session
-- `skills/` — personal reusable Pi skills
-- `prompts/` — reusable prompt templates
-- `agents/` — bundled agent definitions for tmux subagents work
+- `notify-finished` — notifications for long-running prompts
+- `session-changed-files` — track files changed during a Pi session
+- upstream `pi-interactive-subagents` — subagents, `/plan`, `/iterate`, `/subagent`, and session artifacts
+- local subagent model/thinking overrides — repo-managed policy for which model each agent uses
 
-### Planned / in progress
-- `pi-extension/subagents/` — tmux-based interactive subagents package
-- `pi-extension/session-artifacts/` — artifact helpers for planning/execution workflows
+## How subagents work here
 
-### Not shipped by default
-- `experimental/` — WIP skills, prompts, and agents kept in git but excluded from the package manifest
+This repo no longer carries its own subagents implementation.
 
-## Repo layout
-- `pi-extension/` — extension source
-- `agents/` — bundled subagent role definitions
-- `skills/` — reusable Pi skills
-- `prompts/` — prompt templates
-- `docs/` — design notes, install notes, and local development workflow
-- `examples/` — sample config and override examples
-- `experimental/` — draft resources not included in the default install surface
-- `test/` — tests
+Instead, it loads:
+- `pi-interactive-subagents/pi-extension/subagents`
+- `pi-interactive-subagents/pi-extension/session-artifacts`
 
-## Local development workflow
+from `node_modules/`, then applies local runtime overrides from:
+- `config/subagent-model-overrides.json`
 
-The repo is the source of truth.
+That means:
+- upstream prompt and workflow changes flow through package updates
+- this repo controls only model and thinking choices
+- agent prompts are not copied or shadowed locally
 
-1. Edit files in `~/Github/pi_agent_stuff`
-2. Load the package locally in Pi
-3. Use `/reload` after changes
-4. Once the package-managed versions work, remove or disable duplicate global copies from `~/.pi/agent/extensions/`
+## Current subagent model policy
 
-See `docs/local-development.md` for the exact workflow.
+| Agent | Model | Thinking |
+|---|---|---|
+| `planner` | `openai-codex/gpt-5.4` | `high` |
+| `scout` | `openai-codex/gpt-5.4-mini` | `minimal` |
+| `worker` | `openai-codex/gpt-5.4` | `medium` |
+| `reviewer` | `openai-codex/gpt-5.4` | `high` |
+| `visual-tester` | `openai-codex/gpt-5.4` | `low` |
 
 ## Install for local development
 
-Use the repo as a local Pi package:
+First install the npm dependency used by this package:
 
 ```bash
-pi install /home/ashalom/Github/pi_agent_stuff
+cd /home/ashalom/Github/pi-agent-stuff
+npm install
 ```
 
-Or test it for one run only:
+Then install the repo as a local Pi package:
+
+```bash
+pi install /home/ashalom/Github/pi-agent-stuff
+```
+
+## How to update the upstream subagents package
+
+This repo consumes upstream through the npm dependency in `package.json`, not through a direct Pi install.
+
+Update flow:
+
+```bash
+cd /home/ashalom/Github/pi-agent-stuff
+npm update pi-interactive-subagents
+npm test
+```
+
+Then reload or reinstall the repo package:
+
+```text
+/reload
+```
+
+or:
+
+```bash
+pi install /home/ashalom/Github/pi-agent-stuff
+```
+
+If you want to pin a specific upstream ref, change the dependency in `package.json`, run `npm install`, and commit both `package.json` and `package-lock.json`.
+
+For one-off testing without changing Pi settings:
 
 ```bash
 pi -e /home/ashalom/Github/pi-agent-stuff
 ```
 
-## Install from git later
+## Multiplexer support
 
-After pushing to GitHub, install via git:
+The upstream subagents package supports:
+- `cmux`
+- `tmux`
+- `zellij`
+
+Examples:
 
 ```bash
-pi install git:github.com/<your-user>/pi-agent-stuff
+cmux pi
+# or
+TMUX= tmux new -A -s pi 'pi'
+# or
+zellij --session pi
 ```
 
-## Current package manifest
+Optional:
 
-Right now the package exposes these stable extensions:
-- `notify-finished`
-- `session-changed-files`
+```bash
+export PI_SUBAGENT_MUX=tmux
+```
 
-The tmux subagents code is scaffolded in the repo structure but is not yet part of the package manifest until it exists.
+## Files to know
 
-## Docs
-- `docs/local-development.md`
-- `docs/install.md`
-- `docs/repo-layout.md`
-- `docs/tmux-subagents-plan.md`
-- `docs/tmux-subagents-technical-spec.md`
+- `package.json` — package manifest and extension wiring
+- `config/subagent-model-overrides.json` — repo-managed per-agent model/thinking config
+- `pi-extension/subagent-model-overrides/index.ts` — runtime override extension
+- `docs/install.md` — install notes
+- `docs/local-development.md` — local workflow
+- `docs/repo-layout.md` — package structure
+- `docs/tmux-subagents-usage.md` — usage notes for the upstream package in this repo
+
+## Notes
+
+- If you also install `pi-interactive-subagents` directly in Pi, you may load duplicate subagent extensions. Prefer one integration path.
+- If you edit `config/subagent-model-overrides.json`, reload Pi with `/reload`.

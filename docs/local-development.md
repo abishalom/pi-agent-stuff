@@ -1,55 +1,81 @@
 # Local development workflow
 
-This repo is the canonical source for `pi-agent-stuff`.
+This repo is the source of truth for the `pi-agent-stuff` package.
 
 ## Recommended workflow
 
 ### 1. Edit in the repo
+
 Make changes in:
 
-- `~/Github/pi_agent_stuff`
+- `~/Github/pi-agent-stuff`
 
-Do not treat `~/.pi/agent/extensions/` as the long-term source of truth.
+Do not treat `~/.pi/agent/extensions/` as the source of truth.
 
-### 2. Load the repo as a local Pi package
-For day-to-day development:
+### 2. Install dependencies after pulling changes
+
+Because this package loads the upstream subagents package from `node_modules/`, install dependencies locally:
+
+```bash
+cd /home/ashalom/Github/pi-agent-stuff
+npm install
+```
+
+### 3. Load the repo as a local Pi package
 
 ```bash
 pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
-For one-off testing without changing settings:
+For a one-off run:
 
 ```bash
-pi -e /home/ashalom/Github/pi_agent_stuff
+pi -e /home/ashalom/Github/pi-agent-stuff
 ```
 
-### 3. Reload Pi after changes
-Use:
+### 4. Start Pi inside a supported multiplexer
+
+```bash
+cmux pi
+# or
+tmux new -A -s pi 'pi'
+# or
+zellij --session pi
+```
+
+Optional:
+
+```bash
+export PI_SUBAGENT_MUX=tmux
+```
+
+### 5. Reload after config or extension changes
 
 ```text
 /reload
 ```
 
-### 4. Avoid duplicate loading
-The old global copies in `~/.pi/agent/extensions/` can cause duplicate commands or event handlers if the same extension is also loaded from this repo.
+## Cutover notes
 
-Recommended cutover:
-1. Copy extensions into this repo
-2. Verify the repo package loads correctly
-3. Remove or disable duplicate global copies from `~/.pi/agent/extensions/`
+Avoid loading duplicate copies of subagents.
 
-A simple way to disable the old global copies is to rename them so Pi does not discover them as extensions.
+Do not use both of these at the same time unless you want duplicates:
+- this repo package
+- a separate direct Pi install of `git:github.com/HazAT/pi-interactive-subagents`
 
-## Publishing workflow
-Once the repo is stable:
-1. commit changes locally
-2. push to GitHub
-3. optionally switch your Pi install to the git-based package source
+## Updating upstream
 
-Use GitHub for sharing and versioning, not as the primary inner development loop.
+From the repo root:
+
+```bash
+npm update pi-interactive-subagents
+npm test
+```
+
+Then reload Pi or reinstall the local package.
 
 ## Stable vs experimental
+
 - Stable/shareable resources belong in the normal package directories
 - WIP resources belong under `experimental/`
-- `experimental/` is committed to git but should stay out of the package manifest by default
+- `experimental/` is committed to git but excluded from the package manifest by default
