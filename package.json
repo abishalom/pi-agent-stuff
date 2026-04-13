@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Personal Pi package with utility extensions, selected upstream extensions, reusable skills, prompts, and upstream interactive subagents with local model/thinking overrides.",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
     "extensions": [
       "./pi-extension/notify-finished/index.ts",
@@ -14,16 +16,24 @@
       "./node_modules/mitsupi/pi-extensions/files.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
+      "./node_modules/pi-diff-review/src/index.ts",
       "./pi-extension/subagent-model-overrides/index.ts"
     ],
-    "skills": ["./skills", "./node_modules/mitsupi/skills/uv/SKILL.md"],
-    "prompts": ["./prompts"]
+    "skills": [
+      "./skills",
+      "./node_modules/mitsupi/skills/uv/SKILL.md"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
   },
   "scripts": {
     "test": "node --test"
   },
   "dependencies": {
+    "glimpseui": "^0.6.2",
     "mitsupi": "^1.5.0",
+    "pi-diff-review": "github:badlogic/pi-diff-review",
     "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents"
   },
   "peerDependencies": {
