@@ -1,68 +1,85 @@
 # pi-agent-stuff
 
-Personal Pi package with utility extensions, reusable prompts and skills, and an upstream-backed subagents setup.
+Personal Pi package that I use as the portable source of truth for my Pi setup across devices.
 
-## What this package includes
+## What it loads
 
-- `notify-finished` — notifications for long-running prompts
-- `session-changed-files` — track files changed during a Pi session
-- upstream `pi-interactive-subagents` — subagents, `/plan`, `/iterate`, `/subagent`, and session artifacts
-- local subagent model/thinking overrides — repo-managed policy for which model each agent uses
+### Local resources from this repo
+- `pi-extension/notify-finished` — notifications for long-running prompts
+- `pi-extension/session-changed-files` — track files changed during a Pi session
+- `pi-extension/subagent-model-overrides` — apply local model/thinking policy to subagents
+- `skills/` and `prompts/` — local reusable Pi resources
 
-## How subagents work here
+### Selected upstream resources loaded through `node_modules`
+- from `mitsupi`
+  - `pi-extensions/answer.ts`
+  - `pi-extensions/todos.ts`
+  - `pi-extensions/files.ts`
+  - `skills/uv/SKILL.md`
+- from `pi-interactive-subagents`
+  - `pi-extension/subagents`
+  - `pi-extension/session-artifacts`
 
-This repo no longer carries its own subagents implementation.
+The idea is simple: this repo curates which upstream Pi resources get loaded, without copying their source into this repo.
 
-Instead, it loads:
-- `pi-interactive-subagents/pi-extension/subagents`
-- `pi-interactive-subagents/pi-extension/session-artifacts`
-
-from `node_modules/`, then applies local runtime overrides from:
-- `config/subagent-model-overrides.json`
-
-That means:
-- upstream prompt and workflow changes flow through package updates
-- this repo controls only model and thinking choices
-- agent prompts are not copied or shadowed locally
-
-## Current subagent model policy
-
-| Agent | Model | Thinking |
-|---|---|---|
-| `planner` | `openai-codex/gpt-5.4` | `high` |
-| `scout` | `openai-codex/gpt-5.4-mini` | `minimal` |
-| `worker` | `openai-codex/gpt-5.4` | `medium` |
-| `reviewer` | `openai-codex/gpt-5.4` | `high` |
-| `visual-tester` | `openai-codex/gpt-5.4` | `low` |
-
-## Install for local development
-
-First install the npm dependency used by this package:
+## Install
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
 npm install
-```
-
-Then install the repo as a local Pi package:
-
-```bash
 pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
-## How to update the upstream subagents package
+Then reload Pi:
 
-This repo consumes upstream through the npm dependency in `package.json`, not through a direct Pi install.
+```text
+/reload
+```
 
-Update flow:
+For one-off testing without changing Pi settings:
+
+```bash
+pi -e /home/ashalom/Github/pi-agent-stuff
+```
+
+## How to use this repo
+
+- Edit this repo, not `~/.pi/agent/extensions/`
+- Commit both `package.json` and `package-lock.json` when dependency versions change
+- On another device, clone the repo, run `npm install`, then `pi install /path/to/pi-agent-stuff`
+
+### Adding more resources from an upstream package
+
+If you want another extension, skill, prompt, or theme from a dependency such as `mitsupi`, add its path to the `pi` section in `package.json`, then run `npm install` and `/reload`.
+
+Example:
+
+```json
+{
+  "pi": {
+    "extensions": [
+      "./node_modules/mitsupi/pi-extensions/answer.ts",
+      "./node_modules/mitsupi/pi-extensions/todos.ts",
+      "./node_modules/mitsupi/pi-extensions/files.ts",
+      "./node_modules/mitsupi/pi-extensions/<another-extension>.ts"
+    ]
+  }
+}
+```
+
+Use this repo to curate what gets loaded. Do not also install the same upstream package separately in Pi, or you may load the same resource twice.
+
+## Updating upstream packages
+
+Update only what this repo depends on:
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm update pi-interactive-subagents
+npm update mitsupi pi-interactive-subagents
 npm test
 ```
 
-Then reload or reinstall the repo package:
+Then reload or reinstall the package:
 
 ```text
 /reload
@@ -74,13 +91,29 @@ or:
 pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
-If you want to pin a specific upstream ref, change the dependency in `package.json`, run `npm install`, and commit both `package.json` and `package-lock.json`.
+## Avoid duplicate loading
 
-For one-off testing without changing Pi settings:
+If this repo is the source of truth, do **not** also install these separately in Pi:
+- `npm:mitsupi`
+- `pi-interactive-subagents`
 
-```bash
-pi -e /home/ashalom/Github/pi-agent-stuff
-```
+Otherwise the same extensions may load twice.
+
+## Subagents in this repo
+
+Subagent behavior comes from upstream `pi-interactive-subagents`. This repo only controls model and thinking defaults through:
+
+- `config/subagent-model-overrides.json`
+
+Current policy:
+
+| Agent | Model | Thinking |
+|---|---|---|
+| `planner` | `openai-codex/gpt-5.4` | `high` |
+| `scout` | `openai-codex/gpt-5.4-mini` | `minimal` |
+| `worker` | `openai-codex/gpt-5.4` | `medium` |
+| `reviewer` | `openai-codex/gpt-5.4` | `high` |
+| `visual-tester` | `openai-codex/gpt-5.4` | `low` |
 
 ## Multiplexer support
 
@@ -94,7 +127,7 @@ Examples:
 ```bash
 cmux pi
 # or
-TMUX= tmux new -A -s pi 'pi'
+tmux new -A -s pi 'pi'
 # or
 zellij --session pi
 ```
@@ -104,18 +137,3 @@ Optional:
 ```bash
 export PI_SUBAGENT_MUX=tmux
 ```
-
-## Files to know
-
-- `package.json` — package manifest and extension wiring
-- `config/subagent-model-overrides.json` — repo-managed per-agent model/thinking config
-- `pi-extension/subagent-model-overrides/index.ts` — runtime override extension
-- `docs/install.md` — install notes
-- `docs/local-development.md` — local workflow
-- `docs/repo-layout.md` — package structure
-- `docs/tmux-subagents-usage.md` — usage notes for the upstream package in this repo
-
-## Notes
-
-- If you also install `pi-interactive-subagents` directly in Pi, you may load duplicate subagent extensions. Prefer one integration path.
-- If you edit `config/subagent-model-overrides.json`, reload Pi with `/reload`.

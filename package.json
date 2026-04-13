@@ -3,23 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Personal Pi package with utility extensions, reusable skills, prompts, and upstream interactive subagents with local model/thinking overrides.",
+  "description": "Personal Pi package with utility extensions, selected upstream extensions, reusable skills, prompts, and upstream interactive subagents with local model/thinking overrides.",
   "keywords": ["pi-package"],
   "pi": {
     "extensions": [
       "./pi-extension/notify-finished/index.ts",
       "./pi-extension/session-changed-files/index.ts",
+      "./node_modules/mitsupi/pi-extensions/answer.ts",
+      "./node_modules/mitsupi/pi-extensions/todos.ts",
+      "./node_modules/mitsupi/pi-extensions/files.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
       "./pi-extension/subagent-model-overrides/index.ts"
     ],
-    "skills": ["./skills"],
+    "skills": ["./skills", "./node_modules/mitsupi/skills/uv/SKILL.md"],
     "prompts": ["./prompts"]
   },
   "scripts": {
     "test": "node --test"
   },
   "dependencies": {
+    "mitsupi": "^1.5.0",
     "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents"
   },
   "peerDependencies": {
