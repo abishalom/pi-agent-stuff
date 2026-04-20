@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { DynamicBorder, type ExtensionAPI, type ExtensionContext, type Theme } from "@mariozechner/pi-coding-agent";
+import { Container, matchesKey, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 const ENTRY_TYPE = "prompt-stash";
 const STATUS_KEY = "prompt-stash";
@@ -14,6 +15,7 @@ const SHORTCUT_POP = "ctrl+alt+o";
 const SHORTCUT_PICK = "ctrl+alt+k";
 
 const PREVIEW_MAX = 72;
+const PICKER_MAX_ROWS = 10;
 
 type StashItem = {
 	id: string;
@@ -22,6 +24,12 @@ type StashItem = {
 };
 
 type StashEvent = { op: "push"; item: StashItem } | { op: "remove"; id: string } | { op: "clear" };
+
+type PickerAction =
+	| { action: "restore"; id: string }
+	| { action: "preview"; id: string }
+	| { action: "delete"; id: string }
+	| { action: "cancel" };
 
 function isStashItem(value: unknown): value is StashItem {
 	if (!value || typeof value !== "object") return false;
@@ -66,6 +74,10 @@ function formatTimestamp(timestamp: number): string {
 
 function formatPickerLabel(item: StashItem): string {
 	return `[${formatTimestamp(item.createdAt)}] ${preview(item.text)}`;
+}
+
+function isBlank(text: string): boolean {
+	return text.trim().length === 0;
 }
 
 function refreshStatus(ctx: ExtensionContext, stash: StashItem[]): void {
@@ -118,6 +130,102 @@ function persistEvent(pi: ExtensionAPI, event: StashEvent): void {
 	pi.appendEntry(ENTRY_TYPE, event);
 }
 
+class StashPickerComponent {
+	private selected = 0;
+	private scrollTop = 0;
+
+	constructor(
+		private readonly theme: Theme,
+		private readonly items: StashItem[],
+		private readonly done: (result: PickerAction) => void,
+	) {}
+
+	handleInput(data: string): void {
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			this.done({ action: "cancel" });
+			return;
+		}
+
+		if (matchesKey(data, "up") || data === "k" || data === "K") {
+			this.selected = Math.max(0, this.selected - 1);
+			this.ensureSelectionVisible();
+			return;
+		}
+
+		if (matchesKey(data, "down") || data === "j" || data === "J") {
+			this.selected = Math.min(this.items.length - 1, this.selected + 1);
+			this.ensureSelectionVisible();
+			return;
+		}
+
+		const item = this.items[this.selected];
+		if (!item) return;
+
+		if (matchesKey(data, "return") || data === "o" || data === "O") {
+			this.done({ action: "restore", id: item.id });
+			return;
+		}
+		if (data === "p" || data === "P") {
+			this.done({ action: "preview", id: item.id });
+			return;
+		}
+		if (data === "d" || data === "D") {
+			this.done({ action: "delete", id: item.id });
+		}
+	}
+
+	render(width: number): string[] {
+		const container = new Container();
+		container.addChild(new DynamicBorder((s: string) => this.theme.fg("accent", s)));
+		container.addChild(new Text(this.theme.fg("accent", this.theme.bold(`Prompt Stash (${this.items.length})`)), 1, 0));
+		container.addChild(
+			new Text(this.theme.fg("dim", "↑↓/j k navigate • enter/o restore • p preview • d delete • esc cancel"), 1, 0),
+		);
+		container.addChild(new Text("", 0, 0));
+
+		const visibleItems = this.items.slice(this.scrollTop, this.scrollTop + PICKER_MAX_ROWS);
+		const availableWidth = Math.max(20, width - 4);
+		for (let i = 0; i < visibleItems.length; i++) {
+			const absoluteIndex = this.scrollTop + i;
+			const item = visibleItems[i]!;
+			const isSelected = absoluteIndex === this.selected;
+			const prefix = isSelected ? this.theme.fg("accent", "▶ ") : this.theme.fg("dim", "  ");
+			const body = truncateToWidth(formatPickerLabel(item), availableWidth);
+			const line = `${prefix}${isSelected ? this.theme.fg("accent", body) : body}`;
+			container.addChild(new Text(line, 1, 0));
+		}
+
+		if (this.items.length > PICKER_MAX_ROWS) {
+			const start = this.scrollTop + 1;
+			const end = Math.min(this.items.length, this.scrollTop + PICKER_MAX_ROWS);
+			container.addChild(new Text(this.theme.fg("dim", `${start}-${end} of ${this.items.length}`), 1, 0));
+		}
+
+		const selectedItem = this.items[this.selected];
+		if (selectedItem) {
+			container.addChild(new Text("", 0, 0));
+			container.addChild(new Text(this.theme.fg("dim", "Selected preview:"), 1, 0));
+			container.addChild(new Text(this.theme.fg("muted", preview(selectedItem.text, Math.max(20, width - 6))), 1, 0));
+		}
+
+		container.addChild(new DynamicBorder((s: string) => this.theme.fg("accent", s)));
+		return container.render(width);
+	}
+
+	invalidate(): void {}
+
+	private ensureSelectionVisible(): void {
+		if (this.selected < this.scrollTop) {
+			this.scrollTop = this.selected;
+			return;
+		}
+		const maxVisibleIndex = this.scrollTop + PICKER_MAX_ROWS - 1;
+		if (this.selected > maxVisibleIndex) {
+			this.scrollTop = this.selected - PICKER_MAX_ROWS + 1;
+		}
+	}
+}
+
 export default function promptStash(pi: ExtensionAPI) {
 	let stash: StashItem[] = [];
 
@@ -127,7 +235,7 @@ export default function promptStash(pi: ExtensionAPI) {
 
 	const stashCurrent = (ctx: ExtensionContext) => {
 		const text = getEditorText(ctx);
-		if (text.length === 0) {
+		if (isBlank(text)) {
 			ctx.ui.notify("Editor is empty", "info");
 			return;
 		}
@@ -174,34 +282,60 @@ export default function promptStash(pi: ExtensionAPI) {
 			return;
 		}
 
-		const items = [...stash].reverse();
-		const labelToId = new Map<string, string>();
-		const options = items.map((item, index) => {
-			const label = `${formatPickerLabel(item)} (#${index + 1})`;
-			labelToId.set(label, item.id);
-			return label;
-		});
+		while (stash.length > 0) {
+			const items = [...stash].reverse();
+			const result = await ctx.ui.custom<PickerAction>(
+				(tui, theme, _kb, done) => new StashPickerComponent(theme, items, done),
+				{
+					overlay: true,
+					overlayOptions: {
+						anchor: "bottom-center",
+						offsetY: -4,
+						width: "70%",
+						maxHeight: "70%",
+					},
+				},
+			);
 
-		const selected = await ctx.ui.select("Pick stashed prompt", options);
-		if (!selected) {
-			ctx.ui.notify("Cancelled", "info");
+			if (!result || result.action === "cancel") {
+				return;
+			}
+
+			const item = stash.find((entry) => entry.id === result.id);
+			if (!item) {
+				ctx.ui.notify("Selected stash item no longer exists", "error");
+				return;
+			}
+
+			if (result.action === "preview") {
+				await ctx.ui.editor("Preview stashed prompt", item.text);
+				continue;
+			}
+
+			if (result.action === "delete") {
+				const removed = removeById(item.id);
+				if (!removed) {
+					ctx.ui.notify("Selected stash item no longer exists", "error");
+					return;
+				}
+				persistEvent(pi, { op: "remove", id: removed.id });
+				syncUi(ctx);
+				ctx.ui.notify("Deleted stashed prompt", "info");
+				if (stash.length === 0) return;
+				continue;
+			}
+
+			const removed = removeById(item.id);
+			if (!removed) {
+				ctx.ui.notify("Selected stash item no longer exists", "error");
+				return;
+			}
+			persistEvent(pi, { op: "remove", id: removed.id });
+			restoreItem(ctx, removed);
 			return;
 		}
 
-		const id = labelToId.get(selected);
-		if (!id) {
-			ctx.ui.notify("Could not resolve selected stash item", "error");
-			return;
-		}
-
-		const item = removeById(id);
-		if (!item) {
-			ctx.ui.notify("Selected stash item no longer exists", "error");
-			return;
-		}
-
-		persistEvent(pi, { op: "remove", id: item.id });
-		restoreItem(ctx, item);
+		ctx.ui.notify("No saved prompts", "info");
 	};
 
 	const clearStash = (ctx: ExtensionContext) => {
