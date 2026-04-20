@@ -203,9 +203,10 @@ class StashPickerComponent {
 
 		const selectedItem = this.items[this.selected];
 		if (selectedItem) {
+			const previewWidth = Math.max(20, width - 6);
 			container.addChild(new Text("", 0, 0));
 			container.addChild(new Text(this.theme.fg("dim", "Selected preview:"), 1, 0));
-			container.addChild(new Text(this.theme.fg("muted", preview(selectedItem.text, Math.max(20, width - 6))), 1, 0));
+			container.addChild(new Text(this.theme.fg("muted", truncateToWidth(preview(selectedItem.text, previewWidth), previewWidth)), 1, 0));
 		}
 
 		container.addChild(new DynamicBorder((s: string) => this.theme.fg("accent", s)));

@@ -12,15 +12,9 @@
       "./pi-extension/notify-finished/index.ts",
       "./pi-extension/session-changed-files/index.ts",
       "./pi-extension/prompt-stash/index.ts",
-<<<<<<< HEAD
       "./node_modules/mitsupi/extensions/answer.ts",
       "./node_modules/mitsupi/extensions/todos.ts",
       "./node_modules/mitsupi/extensions/files.ts",
-=======
-      "./node_modules/mitsupi/extensions/answer.ts",
-      "./node_modules/mitsupi/extensions/todos.ts",
-      "./node_modules/mitsupi/extensions/files.ts",
->>>>>>> b6d37f6 (Update mitsupi paths and version)
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
       "./node_modules/pi-diff-review/src/index.ts",
