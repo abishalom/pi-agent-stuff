@@ -12,9 +12,15 @@
       "./pi-extension/notify-finished/index.ts",
       "./pi-extension/session-changed-files/index.ts",
       "./pi-extension/prompt-stash/index.ts",
-      "./node_modules/mitsupi/pi-extensions/answer.ts",
-      "./node_modules/mitsupi/pi-extensions/todos.ts",
-      "./node_modules/mitsupi/pi-extensions/files.ts",
+<<<<<<< HEAD
+      "./node_modules/mitsupi/extensions/answer.ts",
+      "./node_modules/mitsupi/extensions/todos.ts",
+      "./node_modules/mitsupi/extensions/files.ts",
+=======
+      "./node_modules/mitsupi/extensions/answer.ts",
+      "./node_modules/mitsupi/extensions/todos.ts",
+      "./node_modules/mitsupi/extensions/files.ts",
+>>>>>>> b6d37f6 (Update mitsupi paths and version)
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
       "./node_modules/pi-diff-review/src/index.ts",
@@ -33,7 +39,7 @@
   },
   "dependencies": {
     "glimpseui": "^0.6.2",
-    "mitsupi": "^1.5.0",
+    "mitsupi": "^1.6.0",
     "pi-diff-review": "github:badlogic/pi-diff-review",
     "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents"
   },

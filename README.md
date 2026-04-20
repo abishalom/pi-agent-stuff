@@ -58,10 +58,10 @@ Example:
 {
   "pi": {
     "extensions": [
-      "./node_modules/mitsupi/pi-extensions/answer.ts",
-      "./node_modules/mitsupi/pi-extensions/todos.ts",
-      "./node_modules/mitsupi/pi-extensions/files.ts",
-      "./node_modules/mitsupi/pi-extensions/<another-extension>.ts"
+      "./node_modules/mitsupi/extensions/answer.ts",
+      "./node_modules/mitsupi/extensions/todos.ts",
+      "./node_modules/mitsupi/extensions/files.ts",
+      "./node_modules/mitsupi/extensions/<another-extension>.ts"
     ]
   }
 }
