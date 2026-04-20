@@ -12,7 +12,7 @@
       "./pi-extension/notify-finished/index.ts",
       "./pi-extension/session-changed-files/index.ts",
       "./pi-extension/prompt-stash/index.ts",
-      "./node_modules/mitsupi/extensions/answer.ts",
+      "./pi-extension/answer/index.ts",
       "./node_modules/mitsupi/extensions/todos.ts",
       "./node_modules/mitsupi/extensions/files.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",

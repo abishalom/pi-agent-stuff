@@ -5,6 +5,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 ## What it loads
 
 ### Local resources from this repo
+- `pi-extension/answer` — local `/answer` replacement with repo-managed config and upstream-matching UX
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/subagent-model-overrides` — apply local model/thinking policy to subagents
@@ -12,7 +13,6 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 
 ### Selected upstream resources loaded through `node_modules`
 - from `mitsupi`
-  - `pi-extensions/answer.ts`
   - `pi-extensions/todos.ts`
   - `pi-extensions/files.ts`
   - `skills/uv/SKILL.md`
@@ -20,7 +20,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
   - `pi-extension/subagents`
   - `pi-extension/session-artifacts`
 
-The idea is simple: this repo curates which upstream Pi resources get loaded, without copying their source into this repo.
+The idea is simple: this repo curates which upstream Pi resources get loaded, while keeping a small number of local replacements when repo-specific behavior is needed.
 
 ## Install
 
@@ -58,7 +58,7 @@ Example:
 {
   "pi": {
     "extensions": [
-      "./node_modules/mitsupi/extensions/answer.ts",
+      "./pi-extension/answer/index.ts",
       "./node_modules/mitsupi/extensions/todos.ts",
       "./node_modules/mitsupi/extensions/files.ts",
       "./node_modules/mitsupi/extensions/<another-extension>.ts"
@@ -104,6 +104,24 @@ Otherwise the same extensions may load twice.
 Subagent behavior comes from upstream `pi-interactive-subagents`. This repo only controls model and thinking defaults through:
 
 - `config/subagent-model-overrides.json`
+
+### `/answer` config
+
+`/answer` is implemented locally in this repo so its extraction source and model priority can be configured without editing TypeScript.
+
+Config file:
+- `config/answer.json`
+
+Default config:
+- source: `last-assistant`
+- model priority:
+  1. `github-copilot/gpt-5.4-mini`
+  2. `openai-codex/gpt-5.4-mini`
+  3. fallback to the current model
+- thinking level: `low`
+
+Optional override:
+- `thinkingLevel` in `config/answer.json` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`)
 
 Current policy:
 

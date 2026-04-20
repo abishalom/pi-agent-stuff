@@ -2,9 +2,11 @@
 
 ## Stable package surface
 
+- `pi-extension/answer/` — local `/answer` replacement with configurable source/model selection
 - `pi-extension/notify-finished/` — long-running prompt notifications
 - `pi-extension/session-changed-files/` — per-session changed-file tracking
 - `pi-extension/subagent-model-overrides/` — runtime model/thinking overrides for upstream subagents
+- `config/answer.json` — repo-managed `/answer` behavior
 - `config/subagent-model-overrides.json` — repo-managed per-agent model/thinking policy
 - `skills/` — reusable Pi skills
 - `prompts/` — reusable prompt templates
