@@ -15,6 +15,10 @@
     "model": "openai-codex/gpt-5.4",
     "thinking": "high"
   },
+  "spec": {
+    "model": "openai-codex/gpt-5.4",
+    "thinking": "medium"
+  },
   "visual-tester": {
     "model": "openai-codex/gpt-5.4",
     "thinking": "low"
