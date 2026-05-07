@@ -1,14 +1,5 @@
-import {
-	type Component,
-	Editor,
-	type EditorTheme,
-	Key,
-	matchesKey,
-	truncateToWidth,
-	type TUI,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+import type { Component, EditorTheme, TUI } from "@earendil-works/pi-tui";
+import { Editor, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../lib/pi-tui-compat.ts";
 
 export interface ExtractedQuestion {
 	question: string;

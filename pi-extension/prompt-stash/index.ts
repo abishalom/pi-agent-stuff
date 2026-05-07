@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { DynamicBorder, type ExtensionAPI, type ExtensionContext, type Theme } from "@mariozechner/pi-coding-agent";
-import { Container, matchesKey, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "../lib/pi-coding-agent-compat.ts";
+import { Container, matchesKey, Text, truncateToWidth, visibleWidth } from "../lib/pi-tui-compat.ts";
 
 const ENTRY_TYPE = "prompt-stash";
 const STATUS_KEY = "prompt-stash";
