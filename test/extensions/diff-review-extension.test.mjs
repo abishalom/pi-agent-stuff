@@ -88,4 +88,6 @@ test("reply tool rejects malformed or unknown payloads", async () => {
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", reply: "x" }), /path/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", reply: "" }), /reply/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", line: { startLine: 6, endLine: 4, targetSide: "new" }, reply: "x" }), /line/i);
+	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/other.ts", reply: "x" }), /path/i);
+	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", line: { startLine: 9, endLine: 10, targetSide: "new" }, reply: "x" }), /line/i);
 });

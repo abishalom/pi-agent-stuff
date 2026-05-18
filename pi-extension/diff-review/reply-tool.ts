@@ -14,6 +14,16 @@ function validateLine(line: DiffReviewReplyParams["line"]) {
 	}
 }
 
+function lineMatches(expected: DiffReviewReplyParams["line"], actual: DiffReviewReplyParams["line"]) {
+	if (expected == null && actual == null) {
+		return true;
+	}
+	if (expected == null || actual == null) {
+		return false;
+	}
+	return expected.startLine === actual.startLine && expected.endLine === actual.endLine && expected.targetSide === actual.targetSide;
+}
+
 function findThread(session: ReviewSession, params: DiffReviewReplyParams) {
 	if (!params.threadId && !params.commentId) {
 		throw new Error("Reply must include threadId or commentId");
@@ -53,6 +63,12 @@ export async function recordReply(store: { getById(reviewSessionId: string): Rev
 	}
 	validateLine(params.line);
 	const thread = findThread(session, params);
+	if (params.path !== thread.path) {
+		throw new Error("Reply path does not match target thread");
+	}
+	if (params.line != null && !lineMatches(params.line, thread.root.line)) {
+		throw new Error("Reply line does not match target thread");
+	}
 	const recordedReply: RecordedDiffReviewReply = {
 		id: `reply-${session.nextReplyId++}`,
 		reviewSessionId: session.reviewSessionId,

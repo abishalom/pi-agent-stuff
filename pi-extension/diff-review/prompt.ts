@@ -11,7 +11,8 @@ export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId"
 		.map((thread) => {
 			const kind = thread.root.line ? "line/range comment" : "file-level comment";
 			const line = thread.root.line ? `; line reference: ${formatLine(thread.root.line)}` : "";
-			return `- threadId=${thread.id}; commentId=${thread.root.id}; path=${thread.path}; kind=${kind}${line}; body=${thread.root.body}`;
+			const body = JSON.stringify(thread.root.body);
+			return `- threadId=${thread.id}; commentId=${thread.root.id}; path=${thread.path}; kind=${kind}${line}; bodyJson=${body}`;
 		})
 		.join("\n");
 

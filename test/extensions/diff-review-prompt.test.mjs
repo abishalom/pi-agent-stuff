@@ -61,3 +61,12 @@ test("prompt synthesis includes the full submit contract and requires tool-call 
 	assert.match(prompt, /must call the diff_review_reply tool/i);
 	assert.match(prompt, /do not reply only with freeform chat text/i);
 });
+
+test("prompt synthesis safely escapes multiline comment bodies", () => {
+	const session = makeSessionWithFileAndLineComments();
+	session.threads[0].root.body = "First line\n```ts\nconst x = 1;\n```\nLast line";
+	const prompt = buildReviewPrompt(session, makeSubmissionRound());
+	assert.match(prompt, /bodyJson=/);
+	assert.match(prompt, /"First line\\n```ts\\nconst x = 1;\\n```\\nLast line"/);
+	assert.doesNotMatch(prompt, /body=First line\n```ts/);
+});
