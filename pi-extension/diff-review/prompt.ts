@@ -11,9 +11,11 @@ export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId"
 		.map((thread) => {
 			const kind = thread.root.line ? "line/range comment" : "file-level comment";
 			const line = thread.root.line ? `; line reference: ${formatLine(thread.root.line)}` : "";
+			const threadId = JSON.stringify(thread.id);
+			const commentId = JSON.stringify(thread.root.id);
 			const body = JSON.stringify(thread.root.body);
 			const path = JSON.stringify(thread.path);
-			return `- threadId=${thread.id}; commentId=${thread.root.id}; pathJson=${path}; kind=${kind}${line}; bodyJson=${body}`;
+			return `- threadId=${threadId}; commentId=${commentId}; pathJson=${path}; kind=${kind}${line}; bodyJson=${body}`;
 		})
 		.join("\n");
 
@@ -21,8 +23,8 @@ export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId"
 
 	return [
 		"You are reviewing a diff review submission.",
-		`reviewSessionId: ${session.reviewSessionId}`,
-		`submissionRoundId: ${round.id}`,
+		`reviewSessionId: ${JSON.stringify(session.reviewSessionId)}`,
+		`submissionRoundId: ${JSON.stringify(round.id)}`,
 		`diffMode: ${session.diffMode}`,
 		"Files in scope:",
 		fileLines,
