@@ -35,6 +35,11 @@ function parseRoundNumber(roundId: string) {
 	return match ? Number(match[1]) : 0;
 }
 
+function parseReviewSessionNumber(reviewSessionId: string) {
+	const match = /^review-session-(\d+)$/.exec(reviewSessionId);
+	return match ? Number(match[1]) : 0;
+}
+
 function createSubmissionRound(session: ReviewSession): ReviewSubmissionRound {
 	return {
 		id: `round-${session.nextSubmissionRound}`,
@@ -63,6 +68,7 @@ export function createReviewSessionStore() {
 			const existing = byKey.get(key);
 			if (existing) return existing;
 			const reviewSessionId = seed.reviewSessionId ?? `review-session-${nextReviewSessionId++}`;
+			nextReviewSessionId = Math.max(nextReviewSessionId, parseReviewSessionNumber(reviewSessionId) + 1);
 			const session = normalizeSession(seed, reviewSessionId);
 			byKey.set(key, session);
 			byId.set(session.reviewSessionId, session);

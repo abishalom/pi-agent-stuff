@@ -41,6 +41,20 @@ test("review sessions are keyed by pi session key and repo root", () => {
 	assert.notEqual(a.reviewSessionId, b.reviewSessionId);
 });
 
+
+test("generated review session ids do not collide with seeded explicit ids", () => {
+	const store = createReviewSessionStore();
+	const seeded = store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		reviewSessionId: "review-session-1",
+	});
+	const generated = store.create({ piSessionKey: "s1", repoRoot: "/repo-b" });
+
+	assert.notEqual(generated.reviewSessionId, seeded.reviewSessionId);
+	assert.equal(store.getById(seeded.reviewSessionId), seeded);
+});
+
 test("submit state is atomic when Pi injection fails", async () => {
 	const session = makeSessionWithOpenThread();
 	const failingInject = async () => {
