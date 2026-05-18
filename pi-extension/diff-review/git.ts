@@ -170,8 +170,12 @@ async function resolveMergeBase(repoRoot: string) {
 	return stdout.trim();
 }
 
-async function listRepoPaths(repoRoot: string) {
-	const { stdout } = await runGit(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+async function listRepoPaths(repoRoot: string, effectiveMode: DiffMode, headRef?: string) {
+	if (effectiveMode === "working-tree-vs-head") {
+		const { stdout } = await runGit(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+		return splitZeroTerminated(stdout);
+	}
+	const { stdout } = await runGit(repoRoot, ["ls-tree", "-r", "--name-only", "-z", headRef!]);
 	return splitZeroTerminated(stdout);
 }
 
@@ -277,7 +281,8 @@ export async function createDiffProvider({
 		},
 		async loadTree(): Promise<DiffTree> {
 			cachedTree ??= (async () => {
-				const paths = new Set(await listRepoPaths(repoRoot));
+				const mode = await getMode();
+				const paths = new Set(await listRepoPaths(repoRoot, mode.effectiveMode, mode.headRef));
 				const changedFiles = await getChangedFiles();
 				for (const file of changedFiles) {
 					paths.add(file.path);
@@ -292,7 +297,10 @@ export async function createDiffProvider({
 		},
 		async loadFile(filePath: string): Promise<DiffFileDetail> {
 			const mode = await getMode();
-			const workingTree = await readWorkingTreeFile(repoRoot, filePath, readFileImpl);
+			let workingTree = { buffer: null, missing: true } as Awaited<ReturnType<typeof readWorkingTreeFile>>;
+			if (mode.effectiveMode === "working-tree-vs-head") {
+				workingTree = await readWorkingTreeFile(repoRoot, filePath, readFileImpl);
+			}
 			let changedFiles: DiffTreeEntry[] = [];
 			try {
 				changedFiles = await getChangedFiles();

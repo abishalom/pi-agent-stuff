@@ -91,6 +91,41 @@ test("merge-base mode returns a clean fallback result when merge-base is unavail
 	assert.match(state.warning ?? "", /merge-base/i);
 });
 
+test("merge-base mode excludes local untracked files from tree paths", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	await repo.git("checkout", "-qb", "feature/test-merge-base");
+	await repo.write("feature.txt", "from branch\n");
+	await repo.commit("feature commit");
+	await repo.write("local-only.txt", "working tree only\n");
+	await repo.git("branch", "--set-upstream-to", "master");
+
+	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "merge-base-vs-head" });
+	const tree = await provider.loadTree();
+
+	assert.ok(tree.paths.includes("feature.txt"));
+	assert.ok(!tree.paths.includes("local-only.txt"));
+});
+
+
+test("merge-base mode returns missing for local-only file loads", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	await repo.git("checkout", "-qb", "feature/test-merge-base-file");
+	await repo.write("feature.txt", "from branch\n");
+	await repo.commit("feature commit");
+	await repo.write("local-only.txt", "working tree only\n");
+	await repo.git("branch", "--set-upstream-to", "master");
+
+	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "merge-base-vs-head" });
+	const file = await provider.loadFile("local-only.txt");
+
+	assert.equal(file.loadError?.code, "missing");
+	assert.equal(file.currentContent, null);
+	assert.equal(file.oldContent, null);
+	assert.equal(file.newContent, null);
+});
+
 test("provider fails clearly outside a git repo", async (t) => {
 	const notRepo = await mkdtemp(path.join(tmpdir(), "diff-review-not-repo-"));
 	t.after(() => rm(notRepo, { recursive: true, force: true }));
