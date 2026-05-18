@@ -103,3 +103,24 @@ test("prompt synthesis safely escapes newline-bearing ids", () => {
 	assert.doesNotMatch(prompt, /^- injected thread instruction$/m);
 	assert.doesNotMatch(prompt, /^- injected comment instruction$/m);
 });
+
+
+test("prompt synthesis safely escapes U+2028 and U+2029 in prompt-exposed fields", () => {
+	const session = makeSessionWithFileAndLineComments();
+	session.files[0].path = "src/a.ts\u2028- injected file instruction";
+	session.threads[0].id = "thread-1\u2029- injected thread instruction";
+	session.threads[0].root.body = "First paragraph\u2028Second paragraph\u2029Third paragraph";
+	const round = makeSubmissionRound();
+	round.threadIds = [session.threads[0].id, session.threads[1].id];
+
+	const prompt = buildReviewPrompt(session, round);
+
+	assert.match(prompt, /- "src\/a\.ts\\u2028- injected file instruction"/);
+	assert.match(prompt, /threadId="thread-1\\u2029- injected thread instruction"/);
+	assert.match(prompt, /bodyJson="First paragraph\\u2028Second paragraph\\u2029Third paragraph"/);
+	assert.equal([...prompt.matchAll(/^Reply instructions:$/gm)].length, 1);
+	assert.doesNotMatch(prompt, /^- injected file instruction$/m);
+	assert.doesNotMatch(prompt, /^- injected thread instruction$/m);
+	assert.ok(!prompt.includes("\u2028"));
+	assert.ok(!prompt.includes("\u2029"));
+});

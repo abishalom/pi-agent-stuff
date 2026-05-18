@@ -43,6 +43,16 @@ test("review sessions are keyed by pi session key and repo root", () => {
 });
 
 
+test("review sessions with :: in key parts do not alias distinct tuples", () => {
+	const store = createReviewSessionStore();
+	const a = store.create({ piSessionKey: "alpha", repoRoot: "beta::gamma" });
+	const b = store.create({ piSessionKey: "alpha::beta", repoRoot: "gamma" });
+
+	assert.notEqual(a.reviewSessionId, b.reviewSessionId);
+	assert.equal(store.getById(a.reviewSessionId), a);
+	assert.equal(store.getById(b.reviewSessionId), b);
+});
+
 test("generated review session ids do not collide with seeded explicit ids", () => {
 	const store = createReviewSessionStore();
 	const seeded = store.create({

@@ -4,6 +4,10 @@ function formatLine(line: { startLine: number; endLine: number; targetSide: stri
 	return `startLine=${line.startLine}, endLine=${line.endLine}, targetSide=${line.targetSide}`;
 }
 
+function encodePromptString(value: string) {
+	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
 export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId" | "diffMode" | "files" | "threads">, round: Pick<ReviewSubmissionRound, "id" | "threadIds">) {
 	const threadIds = new Set(round.threadIds);
 	const threadLines = session.threads
@@ -11,20 +15,20 @@ export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId"
 		.map((thread) => {
 			const kind = thread.root.line ? "line/range comment" : "file-level comment";
 			const line = thread.root.line ? `; line reference: ${formatLine(thread.root.line)}` : "";
-			const threadId = JSON.stringify(thread.id);
-			const commentId = JSON.stringify(thread.root.id);
-			const body = JSON.stringify(thread.root.body);
-			const path = JSON.stringify(thread.path);
+			const threadId = encodePromptString(thread.id);
+			const commentId = encodePromptString(thread.root.id);
+			const body = encodePromptString(thread.root.body);
+			const path = encodePromptString(thread.path);
 			return `- threadId=${threadId}; commentId=${commentId}; pathJson=${path}; kind=${kind}${line}; bodyJson=${body}`;
 		})
 		.join("\n");
 
-	const fileLines = session.files.map((file) => `- ${JSON.stringify(file.path)}`).join("\n");
+	const fileLines = session.files.map((file) => `- ${encodePromptString(file.path)}`).join("\n");
 
 	return [
 		"You are reviewing a diff review submission.",
-		`reviewSessionId: ${JSON.stringify(session.reviewSessionId)}`,
-		`submissionRoundId: ${JSON.stringify(round.id)}`,
+		`reviewSessionId: ${encodePromptString(session.reviewSessionId)}`,
+		`submissionRoundId: ${encodePromptString(round.id)}`,
 		`diffMode: ${session.diffMode}`,
 		"Files in scope:",
 		fileLines,

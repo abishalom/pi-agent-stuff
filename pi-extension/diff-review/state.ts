@@ -2,7 +2,7 @@ import { buildReviewPrompt } from "./prompt.ts";
 import type { ReviewSession, ReviewSessionSeed, ReviewSubmissionRound } from "./types.ts";
 
 function makeStoreKey(piSessionKey: string, repoRoot: string) {
-	return `${piSessionKey}::${repoRoot}`;
+	return JSON.stringify([piSessionKey, repoRoot]);
 }
 
 function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): ReviewSession {
