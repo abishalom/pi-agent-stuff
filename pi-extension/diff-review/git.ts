@@ -123,18 +123,19 @@ async function readGitBlob(repoRoot: string, ref: string, filePath: string) {
 	}
 }
 
-async function readWorkingTreeFile(repoRoot: string, filePath: string): Promise<{ buffer: Buffer | null; loadError?: DiffFileLoadError }> {
+async function readWorkingTreeFile(repoRoot: string, filePath: string): Promise<{ buffer: Buffer | null; missing: boolean; loadError?: DiffFileLoadError }> {
 	try {
 		const buffer = await readFile(path.join(repoRoot, filePath));
-		return { buffer };
+		return { buffer, missing: false };
 	} catch (error) {
 		if (error && typeof error === "object" && "code" in error) {
 			if (error.code === "ENOENT") {
-				return { buffer: null };
+				return { buffer: null, missing: true };
 			}
 			if (error.code === "EACCES" || error.code === "EPERM") {
 				return {
 					buffer: null,
+					missing: false,
 					loadError: {
 						code: "unreadable",
 						message: `Unable to read working tree file: ${filePath}`,
@@ -193,7 +194,8 @@ async function loadChangedEntries(repoRoot: string, spec: { effectiveMode: DiffM
 	if (spec.effectiveMode === "working-tree-vs-head") {
 		for (const filePath of await listUntrackedPaths(repoRoot)) {
 			if (!byPath.has(filePath)) {
-				byPath.set(filePath, { path: filePath, status: "added" });
+				const workingTree = await readWorkingTreeFile(repoRoot, filePath);
+				byPath.set(filePath, { path: filePath, status: detectBinary(workingTree.buffer) ? "binary" : "added" });
 			}
 		}
 	}
@@ -278,6 +280,14 @@ export async function createDiffProvider({ repoRoot, diffMode }: { repoRoot: str
 			const currentBinary = detectBinary(workingTree.buffer);
 			const isBinary = changed?.status === "binary" || oldBinary || newBinary || currentBinary;
 			const status: DiffFileStatus | "unchanged" = isBinary && changed ? "binary" : changed?.status ?? "unchanged";
+			const loadError = workingTree.loadError ?? (
+				workingTree.missing && oldBuffer == null && newBuffer == null
+					? {
+						code: "missing",
+						message: `Requested path is missing from disk and compared refs: ${filePath}`,
+					  }
+					: undefined
+			);
 			return {
 				path: filePath,
 				previousPath,
@@ -289,7 +299,7 @@ export async function createDiffProvider({ repoRoot, diffMode }: { repoRoot: str
 				oldBinary,
 				newBinary,
 				currentBinary,
-				loadError: workingTree.loadError,
+				loadError,
 			};
 		},
 	};

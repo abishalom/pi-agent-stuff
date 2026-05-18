@@ -130,6 +130,29 @@ test("unreadable files are flagged instead of crashing file load", async (t) => 
 	assert.equal(file.loadError?.code, "unreadable");
 });
 
+test("loadFile surfaces missing paths with a structured missing load error", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+
+	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "working-tree-vs-head" });
+	const file = await provider.loadFile("missing.txt");
+
+	assert.equal(file.loadError?.code, "missing");
+	assert.match(file.loadError?.message ?? "", /missing/i);
+});
+
+test("untracked binary files are reported as binary in changed-file metadata", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+
+	await repo.write("new-binary.dat", Buffer.from([0, 1, 2, 3]));
+
+	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "working-tree-vs-head" });
+	const tree = await provider.loadTree();
+
+	assert.equal(tree.changedFiles.find((file) => file.path === "new-binary.dat")?.status, "binary");
+});
+
 test("loadFile reports modified, added, deleted, renamed, and binary diff metadata", async (t) => {
 	const repo = await createTempRepoFixture();
 	t.after(() => repo.cleanup());
