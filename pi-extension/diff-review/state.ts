@@ -79,6 +79,12 @@ export function createReviewSessionStore() {
 			const key = makeStoreKey(seed.piSessionKey, seed.repoRoot);
 			const existing = byKey.get(key);
 			if (existing) return existing;
+			if (seed.reviewSessionId) {
+				const existingById = byId.get(seed.reviewSessionId);
+				if (existingById && makeStoreKey(existingById.piSessionKey, existingById.repoRoot) !== key) {
+					throw new Error(`duplicate reviewSessionId: ${seed.reviewSessionId}`);
+				}
+			}
 			const reviewSessionId = seed.reviewSessionId ?? `review-session-${nextReviewSessionId++}`;
 			nextReviewSessionId = Math.max(nextReviewSessionId, parseReviewSessionNumber(reviewSessionId) + 1);
 			const session = normalizeSession(seed, reviewSessionId);

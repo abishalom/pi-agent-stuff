@@ -56,6 +56,24 @@ test("generated review session ids do not collide with seeded explicit ids", () 
 	assert.equal(store.getById(seeded.reviewSessionId), seeded);
 });
 
+test("explicit review session ids cannot be reused across different store keys", () => {
+	const store = createReviewSessionStore();
+	store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		reviewSessionId: "review-session-1",
+	});
+
+	assert.throws(
+		() => store.create({
+			piSessionKey: "s2",
+			repoRoot: "/repo-b",
+			reviewSessionId: "review-session-1",
+		}),
+		/duplicate reviewSessionId/i,
+	);
+});
+
 test("submit state is atomic when Pi injection fails", async () => {
 	const session = makeSessionWithOpenThread();
 	const failingInject = async () => {

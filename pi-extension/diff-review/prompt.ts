@@ -12,11 +12,12 @@ export function buildReviewPrompt(session: Pick<ReviewSession, "reviewSessionId"
 			const kind = thread.root.line ? "line/range comment" : "file-level comment";
 			const line = thread.root.line ? `; line reference: ${formatLine(thread.root.line)}` : "";
 			const body = JSON.stringify(thread.root.body);
-			return `- threadId=${thread.id}; commentId=${thread.root.id}; path=${thread.path}; kind=${kind}${line}; bodyJson=${body}`;
+			const path = JSON.stringify(thread.path);
+			return `- threadId=${thread.id}; commentId=${thread.root.id}; pathJson=${path}; kind=${kind}${line}; bodyJson=${body}`;
 		})
 		.join("\n");
 
-	const fileLines = session.files.map((file) => `- ${file.path}`).join("\n");
+	const fileLines = session.files.map((file) => `- ${JSON.stringify(file.path)}`).join("\n");
 
 	return [
 		"You are reviewing a diff review submission.",
