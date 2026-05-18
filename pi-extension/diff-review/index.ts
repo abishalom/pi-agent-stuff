@@ -1,18 +1,8 @@
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { DiffReviewReplyParams } from "./types.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerDiffReviewReplyTool } from "./reply-tool.ts";
+import { createReviewSessionStore } from "./state.ts";
 
-const diffReviewReplyTool = defineTool({
-	name: "diff_review_reply",
-	label: "Diff Review Reply",
-	description: "Reply to a diff review request",
-	parameters: Type.Object({
-		body: Type.String({ description: "Reply text to send back to the diff review flow" }),
-	}),
-	async execute(_toolCallId, _params: DiffReviewReplyParams) {
-		throw new Error("not implemented yet");
-	},
-});
+const reviewSessionStore = createReviewSessionStore();
 
 export default function diffReviewExtension(pi: ExtensionAPI) {
 	pi.registerCommand("diff-review", {
@@ -22,5 +12,5 @@ export default function diffReviewExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerTool(diffReviewReplyTool);
+	registerDiffReviewReplyTool(pi, reviewSessionStore);
 }
