@@ -12,6 +12,8 @@ function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): Rev
 			reviewSessionId,
 		  }
 		: null;
+	const threads = seed.threads ? [...seed.threads] : [];
+	const submissionHistory = seed.submissionHistory ? [...seed.submissionHistory] : [];
 
 	return {
 		piSessionKey: seed.piSessionKey,
@@ -20,18 +22,28 @@ function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): Rev
 		serverSecret: seed.serverSecret ?? `server-secret-${reviewSessionId}`,
 		diffMode: seed.diffMode ?? "working-tree-vs-head",
 		files: seed.files ? [...seed.files] : [],
-		threads: seed.threads ? [...seed.threads] : [],
+		threads,
 		pendingSubmission,
-		submissionHistory: seed.submissionHistory ? [...seed.submissionHistory] : [],
+		submissionHistory,
 		nextSubmissionRound:
 			seed.nextSubmissionRound ??
-			((pendingSubmission ? parseRoundNumber(pendingSubmission.id) + 1 : 1) || 1),
-		nextReplyId: seed.nextReplyId ?? 1,
+			Math.max(
+				pendingSubmission ? parseRoundNumber(pendingSubmission.id) + 1 : 1,
+				...submissionHistory.map((round) => parseRoundNumber(round.id) + 1),
+			),
+		nextReplyId:
+			seed.nextReplyId ??
+			Math.max(1, ...threads.flatMap((thread) => thread.replies.map((reply) => parseReplyNumber(reply.id) + 1))),
 	};
 }
 
 function parseRoundNumber(roundId: string) {
 	const match = /^round-(\d+)$/.exec(roundId);
+	return match ? Number(match[1]) : 0;
+}
+
+function parseReplyNumber(replyId: string) {
+	const match = /^reply-(\d+)$/.exec(replyId);
 	return match ? Number(match[1]) : 0;
 }
 

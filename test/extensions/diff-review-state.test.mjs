@@ -6,6 +6,7 @@ import {
 	createReviewSessionStore,
 	submitReview,
 } from "../../pi-extension/diff-review/state.ts";
+import { recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
 
 function makeSessionWithOpenThread() {
 	const store = createReviewSessionStore();
@@ -96,4 +97,113 @@ test("completed submission rounds clear pending state and allow later submits", 
 
 	const nextRound = await submitReview(session, successfulInject);
 	assert.notEqual(nextRound.id, round.id);
+});
+
+test("restored sessions derive the next submission round after the max historical or pending round id", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		serverSecret: "secret-1",
+		diffMode: "working-tree-vs-head",
+		files: [{ path: "src/a.ts" }],
+		threads: [
+			{
+				id: "thread-1",
+				path: "src/a.ts",
+				root: {
+					id: "comment-1",
+					path: "src/a.ts",
+					body: "Please review this change",
+					status: "submitted",
+					line: { startLine: 4, endLine: 6, targetSide: "new" },
+				},
+				replies: [],
+			},
+		],
+		pendingSubmission: {
+			id: "round-3",
+			reviewSessionId: "seeded-review-session",
+			threadIds: ["thread-1"],
+		},
+		submissionHistory: [
+			{ id: "round-2", reviewSessionId: "seeded-review-session", threadIds: [] },
+			{ id: "round-5", reviewSessionId: "seeded-review-session", threadIds: [] },
+		],
+	});
+
+	completeSubmissionRound(session, "round-3");
+	session.threads[0].root.status = "open";
+	const nextRound = await submitReview(session, async () => {});
+
+	assert.equal(nextRound.id, "round-6");
+});
+
+test("restored sessions derive the next reply id after the max existing reply id", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		serverSecret: "secret-1",
+		diffMode: "working-tree-vs-head",
+		files: [{ path: "src/a.ts" }],
+		pendingSubmission: {
+			id: "round-1",
+			reviewSessionId: "seeded-review-session",
+			threadIds: ["thread-1", "thread-2"],
+		},
+		threads: [
+			{
+				id: "thread-1",
+				path: "src/a.ts",
+				root: {
+					id: "comment-1",
+					path: "src/a.ts",
+					body: "Please review this change",
+					status: "submitted",
+					line: { startLine: 4, endLine: 6, targetSide: "new" },
+				},
+				replies: [
+					{
+						id: "reply-3",
+						threadId: "thread-1",
+						path: "src/a.ts",
+						reply: "Earlier reply",
+						recordedAt: 1,
+					},
+				],
+			},
+			{
+				id: "thread-2",
+				path: "src/a.ts",
+				root: {
+					id: "comment-2",
+					path: "src/a.ts",
+					body: "Another thread",
+					status: "submitted",
+					line: { startLine: 8, endLine: 9, targetSide: "new" },
+				},
+				replies: [
+					{
+						id: "reply-8",
+						threadId: "thread-2",
+						path: "src/a.ts",
+						reply: "Latest historical reply",
+						recordedAt: 2,
+					},
+				],
+			},
+		],
+	});
+
+	const reply = await recordReply(store, {
+		reviewSessionId: session.reviewSessionId,
+		submissionRoundId: "round-1",
+		threadId: "thread-1",
+		path: "src/a.ts",
+		line: { startLine: 4, endLine: 6, targetSide: "new" },
+		reply: "New reply",
+	});
+
+	assert.equal(reply.id, "reply-9");
 });
