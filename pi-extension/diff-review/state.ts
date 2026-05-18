@@ -1,3 +1,4 @@
+import { buildReviewPrompt } from "./prompt.ts";
 import type { ReviewSession, ReviewSessionSeed, ReviewSubmissionRound } from "./types.ts";
 
 function makeStoreKey(piSessionKey: string, repoRoot: string) {
@@ -78,7 +79,8 @@ export async function submitReview(session: ReviewSession, injectMessage: (promp
 		throw new Error("Review submission already pending");
 	}
 	const round = createSubmissionRound(session);
-	await injectMessage("", round);
+	const prompt = buildReviewPrompt(session, round);
+	await injectMessage(prompt, round);
 	session.pendingSubmission = round;
 	session.nextSubmissionRound += 1;
 	markThreadsSubmitted(session, round.threadIds);

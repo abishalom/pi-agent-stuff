@@ -52,6 +52,26 @@ test("submit state is atomic when Pi injection fails", async () => {
 	assert.equal(session.threads[0].root.status, "open");
 });
 
+test("submitReview injects the synthesized prompt contract", async () => {
+	const session = makeSessionWithOpenThread();
+	let injectedPrompt = null;
+	let injectedRound = null;
+
+	await submitReview(session, async (prompt, round) => {
+		injectedPrompt = prompt;
+		injectedRound = round;
+	});
+
+	assert.equal(typeof injectedPrompt, "string");
+	assert.ok(injectedPrompt.length > 0);
+	assert.match(injectedPrompt, /reviewSessionId:\s+review-session-1/);
+	assert.match(injectedPrompt, /submissionRoundId:\s+round-1/);
+	assert.match(injectedPrompt, /diff_review_reply/);
+	assert.match(injectedPrompt, /must call the diff_review_reply tool/i);
+	assert.match(injectedPrompt, /do not reply only with freeform chat text/i);
+	assert.equal(injectedRound?.id, "round-1");
+});
+
 test("completed submission rounds clear pending state and allow later submits", async () => {
 	const session = makeSessionWithOpenThread();
 	const successfulInject = async () => {};
