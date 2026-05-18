@@ -30,8 +30,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "build:diff-review-web": "node -e \"console.log('diff-review web build scaffold not implemented yet')\"",
-    "verify:diff-review-web": "node -e \"console.log('diff-review web verify scaffold not implemented yet')\""
+    "build:diff-review-web": "node -e \"console.error('build:diff-review-web not implemented yet (Task 5 will add the real pipeline)'); process.exit(1)\"",
+    "verify:diff-review-web": "node -e \"console.error('verify:diff-review-web not implemented yet (Task 5 will add the real pipeline)'); process.exit(1)\""
   },
   "dependencies": {
     "@pierre/diffs": "^1.1.22",
