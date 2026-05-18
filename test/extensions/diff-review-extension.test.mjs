@@ -33,6 +33,7 @@ function makeSessionSeed() {
 		},
 		files: [
 			{ path: "src/a.ts" },
+			{ path: "src/b.ts" },
 		],
 		threads: [
 			{
@@ -44,6 +45,18 @@ function makeSessionSeed() {
 					body: "Please review this change",
 					status: "submitted",
 					line: { startLine: 4, endLine: 6, targetSide: "new" },
+				},
+				replies: [],
+			},
+			{
+				id: "thread-2",
+				path: "src/b.ts",
+				root: {
+					id: "comment-2",
+					path: "src/b.ts",
+					body: "This thread is outside the active round",
+					status: "submitted",
+					line: { startLine: 8, endLine: 8, targetSide: "new" },
 				},
 				replies: [],
 			},
@@ -85,6 +98,7 @@ test("reply tool rejects malformed or unknown payloads", async () => {
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", commentId: "comment-1", path: "src/a.ts", reply: "x" }), /exactly one/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "missing", path: "src/a.ts", reply: "x" }), /thread/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", commentId: "missing", path: "src/a.ts", reply: "x" }), /comment/i);
+	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-2", path: "src/b.ts", reply: "x" }), /active round/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", reply: "x" }), /path/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", reply: "" }), /reply/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", line: { startLine: 6, endLine: 4, targetSide: "new" }, reply: "x" }), /line/i);

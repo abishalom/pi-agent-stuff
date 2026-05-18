@@ -63,6 +63,9 @@ export async function recordReply(store: { getById(reviewSessionId: string): Rev
 	}
 	validateLine(params.line);
 	const thread = findThread(session, params);
+	if (!session.pendingSubmission.threadIds.includes(thread.id)) {
+		throw new Error("Reply target is not part of the active round");
+	}
 	if (params.path !== thread.path) {
 		throw new Error("Reply path does not match target thread");
 	}
