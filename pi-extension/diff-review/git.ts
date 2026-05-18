@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile as defaultReadFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -123,16 +123,23 @@ async function readGitBlob(repoRoot: string, ref: string, filePath: string) {
 	}
 }
 
-async function readWorkingTreeFile(repoRoot: string, filePath: string): Promise<{ buffer: Buffer | null; missing: boolean; loadError?: DiffFileLoadError }> {
+async function readWorkingTreeFile(
+	repoRoot: string,
+	filePath: string,
+	readFileImpl: typeof defaultReadFile,
+): Promise<{ buffer: Buffer | null; missing: boolean; loadError?: DiffFileLoadError }> {
 	try {
-		const buffer = await readFile(path.join(repoRoot, filePath));
+		const buffer = await readFileImpl(path.join(repoRoot, filePath));
+		if (!Buffer.isBuffer(buffer)) {
+			return { buffer: Buffer.from(buffer), missing: false };
+		}
 		return { buffer, missing: false };
 	} catch (error) {
 		if (error && typeof error === "object" && "code" in error) {
 			if (error.code === "ENOENT") {
 				return { buffer: null, missing: true };
 			}
-			if (error.code === "EACCES" || error.code === "EPERM") {
+			if (error.code === "EACCES" || error.code === "EPERM" || error.code === "EISDIR") {
 				return {
 					buffer: null,
 					missing: false,
@@ -173,7 +180,11 @@ async function listUntrackedPaths(repoRoot: string) {
 	return splitZeroTerminated(stdout);
 }
 
-async function loadChangedEntries(repoRoot: string, spec: { effectiveMode: DiffMode; baseRef?: string }) {
+async function loadChangedEntries(
+	repoRoot: string,
+	spec: { effectiveMode: DiffMode; baseRef?: string },
+	readFileImpl: typeof defaultReadFile,
+) {
 	const diffArgs = spec.effectiveMode === "working-tree-vs-head"
 		? ["diff", "--name-status", "-z", "HEAD"]
 		: ["diff", "--name-status", "-z", spec.baseRef!, "HEAD"];
@@ -194,7 +205,7 @@ async function loadChangedEntries(repoRoot: string, spec: { effectiveMode: DiffM
 	if (spec.effectiveMode === "working-tree-vs-head") {
 		for (const filePath of await listUntrackedPaths(repoRoot)) {
 			if (!byPath.has(filePath)) {
-				const workingTree = await readWorkingTreeFile(repoRoot, filePath);
+				const workingTree = await readWorkingTreeFile(repoRoot, filePath, readFileImpl);
 				byPath.set(filePath, { path: filePath, status: detectBinary(workingTree.buffer) ? "binary" : "added" });
 			}
 		}
@@ -230,37 +241,61 @@ async function resolveMode(repoRoot: string, requestedMode: DiffMode): Promise<D
 	}
 }
 
-export async function createDiffProvider({ repoRoot, diffMode }: { repoRoot: string; diffMode: DiffMode }): Promise<DiffProvider> {
+export async function createDiffProvider({
+	repoRoot,
+	diffMode,
+	readFileImpl = defaultReadFile,
+}: {
+	repoRoot: string;
+	diffMode: DiffMode;
+	readFileImpl?: typeof defaultReadFile;
+}): Promise<DiffProvider> {
 	try {
 		await runGit(repoRoot, ["rev-parse", "--show-toplevel"]);
 	} catch (error) {
 		throw normalizeRepoError(repoRoot, error);
 	}
 
+	let cachedMode: Promise<DiffProviderModeState & { baseRef?: string; headRef?: string }> | null = null;
+	let cachedChangedFiles: Promise<DiffTreeEntry[]> | null = null;
+	let cachedTree: Promise<DiffTree> | null = null;
+
+	function getMode() {
+		cachedMode ??= resolveMode(repoRoot, diffMode);
+		return cachedMode;
+	}
+
+	function getChangedFiles() {
+		cachedChangedFiles ??= getMode().then((mode) => loadChangedEntries(repoRoot, mode, readFileImpl));
+		return cachedChangedFiles;
+	}
+
 	return {
 		async loadModeState() {
-			const { requestedMode, effectiveMode, warning } = await resolveMode(repoRoot, diffMode);
+			const { requestedMode, effectiveMode, warning } = await getMode();
 			return { requestedMode, effectiveMode, warning };
 		},
 		async loadTree(): Promise<DiffTree> {
-			const mode = await resolveMode(repoRoot, diffMode);
-			const paths = new Set(await listRepoPaths(repoRoot));
-			const changedFiles = await loadChangedEntries(repoRoot, mode);
-			for (const file of changedFiles) {
-				paths.add(file.path);
-			}
-			return {
-				paths: [...paths].sort((a, b) => a.localeCompare(b)),
-				changedPaths: changedFiles.map((file) => file.path),
-				changedFiles,
-			};
+			cachedTree ??= (async () => {
+				const paths = new Set(await listRepoPaths(repoRoot));
+				const changedFiles = await getChangedFiles();
+				for (const file of changedFiles) {
+					paths.add(file.path);
+				}
+				return {
+					paths: [...paths].sort((a, b) => a.localeCompare(b)),
+					changedPaths: changedFiles.map((file) => file.path),
+					changedFiles,
+				};
+			})();
+			return cachedTree;
 		},
 		async loadFile(filePath: string): Promise<DiffFileDetail> {
-			const mode = await resolveMode(repoRoot, diffMode);
-			const workingTree = await readWorkingTreeFile(repoRoot, filePath);
+			const mode = await getMode();
+			const workingTree = await readWorkingTreeFile(repoRoot, filePath, readFileImpl);
 			let changedFiles: DiffTreeEntry[] = [];
 			try {
-				changedFiles = await loadChangedEntries(repoRoot, mode);
+				changedFiles = await getChangedFiles();
 			} catch (error) {
 				if (workingTree.loadError?.code !== "unreadable") {
 					throw error;

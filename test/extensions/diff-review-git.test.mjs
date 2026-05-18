@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rename as renameFile, rm, unlink, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename as renameFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -42,9 +42,6 @@ async function createTempRepoFixture(options = {}) {
 			await mkdir(path.dirname(nextPath), { recursive: true });
 			await renameFile(path.join(root, fromPath), nextPath);
 		},
-		async chmod(filePath, mode) {
-			await chmod(path.join(root, filePath), mode);
-		},
 		async git(...args) {
 			return run("git", args, root);
 		},
@@ -60,14 +57,6 @@ async function createTempRepoFixture(options = {}) {
 	if (!options.noHeadCommit) {
 		await repo.write("src/a.ts", "export const a = 1;\n");
 		await repo.commit("initial");
-	}
-
-	if (options.unreadableFile) {
-		await repo.write(options.unreadableFile, "top secret\n");
-		if (!options.noHeadCommit) {
-			await repo.commit("add unreadable file");
-		}
-		await repo.chmod(options.unreadableFile, 0o000);
 	}
 
 	if (options.detached && !options.noHeadCommit) {
@@ -118,13 +107,21 @@ test("working-tree mode surfaces missing HEAD clearly", async (t) => {
 });
 
 test("unreadable files are flagged instead of crashing file load", async (t) => {
-	const repo = await createTempRepoFixture({ unreadableFile: "secret.txt" });
-	t.after(async () => {
-		await repo.chmod("secret.txt", 0o644);
-		await repo.cleanup();
-	});
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	await repo.write("secret.txt", "top secret\n");
+	await repo.commit("add secret");
 
-	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "working-tree-vs-head" });
+	const provider = await createDiffProvider({
+		repoRoot: repo.root,
+		diffMode: "working-tree-vs-head",
+		readFileImpl(filePath) {
+			if (filePath.endsWith(`${path.sep}secret.txt`)) {
+				throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+			}
+			return readFile(filePath);
+		},
+	});
 	const file = await provider.loadFile("secret.txt");
 
 	assert.equal(file.loadError?.code, "unreadable");
@@ -151,6 +148,30 @@ test("untracked binary files are reported as binary in changed-file metadata", a
 	const tree = await provider.loadTree();
 
 	assert.equal(tree.changedFiles.find((file) => file.path === "new-binary.dat")?.status, "binary");
+});
+
+test("repeated loadFile calls reuse cached changed-file state", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	await repo.write("src/a.ts", "export const a = 2;\n");
+	await repo.write("new-binary.dat", Buffer.from([0, 1, 2, 3]));
+
+	let unrelatedBinaryReads = 0;
+	const provider = await createDiffProvider({
+		repoRoot: repo.root,
+		diffMode: "working-tree-vs-head",
+		readFileImpl(filePath) {
+			if (filePath.endsWith(`${path.sep}new-binary.dat`)) {
+				unrelatedBinaryReads += 1;
+			}
+			return readFile(filePath);
+		},
+	});
+
+	await provider.loadFile("src/a.ts");
+	await provider.loadFile("src/a.ts");
+
+	assert.equal(unrelatedBinaryReads, 1);
 });
 
 test("loadFile reports modified, added, deleted, renamed, and binary diff metadata", async (t) => {
