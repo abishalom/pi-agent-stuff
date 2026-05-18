@@ -97,8 +97,8 @@ test("submitReview injects the synthesized prompt contract", async () => {
 
 	assert.equal(typeof injectedPrompt, "string");
 	assert.ok(injectedPrompt.length > 0);
-	assert.match(injectedPrompt, /reviewSessionId:\s+review-session-1/);
-	assert.match(injectedPrompt, /submissionRoundId:\s+round-1/);
+	assert.match(injectedPrompt, /reviewSessionId:\s+"review-session-1"/);
+	assert.match(injectedPrompt, /submissionRoundId:\s+"round-1"/);
 	assert.match(injectedPrompt, /diff_review_reply/);
 	assert.match(injectedPrompt, /must call the diff_review_reply tool/i);
 	assert.match(injectedPrompt, /do not reply only with freeform chat text/i);
