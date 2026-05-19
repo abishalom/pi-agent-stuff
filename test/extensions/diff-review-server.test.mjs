@@ -262,6 +262,35 @@ test("concurrent submit requests do not inject the same round twice", async (t) 
 	assert.equal(started.session.pendingSubmission?.id, "round-1");
 });
 
+test("browser-created threads are persisted and included in submit prompts", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root);
+	t.after(() => started.close());
+	started.session.files = [];
+	started.session.threads = [];
+
+	const createThreadResult = await postJson(`${started.baseUrl}/api/threads?secret=${started.session.serverSecret}`, {
+		path: "src/a.ts",
+		body: "What do you think about this change?",
+		line: { startLine: 1, endLine: 1, targetSide: "new" },
+	});
+	assert.equal(createThreadResult.status, 200);
+	assert.equal(createThreadResult.body.thread.path, "src/a.ts");
+	assert.equal(started.session.threads.length, 1);
+	assert.equal(started.session.files.length, 1);
+
+	const submit = await fetch(`${started.baseUrl}/api/submit?secret=${started.session.serverSecret}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({}),
+	});
+	assert.equal(submit.status, 200);
+	assert.match(started.sentPrompts[0], /Files in scope:\n- "src\/a\.ts"/);
+	assert.match(started.sentPrompts[0], /Open comments in this submission round:\n- threadId="thread-\d+"; commentId="comment-\d+"; pathJson="src\/a\.ts"/);
+	assert.match(started.sentPrompts[0], /What do you think about this change\?/);
+});
+
 test("completing a Pi round clears pending state and enables another submit", async (t) => {
 	const repo = await createTempRepoFixture();
 	t.after(() => repo.cleanup());

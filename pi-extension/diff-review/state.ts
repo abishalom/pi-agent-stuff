@@ -31,6 +31,12 @@ function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): Rev
 				pendingSubmission ? parseRoundNumber(pendingSubmission.id) + 1 : 1,
 				...submissionHistory.map((round) => parseRoundNumber(round.id) + 1),
 			),
+		nextThreadId:
+			seed.nextThreadId ??
+			Math.max(1, ...threads.map((thread) => parseThreadNumber(thread.id) + 1)),
+		nextCommentId:
+			seed.nextCommentId ??
+			Math.max(1, ...threads.map((thread) => parseCommentNumber(thread.root.id) + 1)),
 		nextReplyId:
 			seed.nextReplyId ??
 			Math.max(1, ...threads.flatMap((thread) => thread.replies.map((reply) => parseReplyNumber(reply.id) + 1))),
@@ -39,6 +45,16 @@ function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): Rev
 
 function parseRoundNumber(roundId: string) {
 	const match = /^round-(\d+)$/.exec(roundId);
+	return match ? Number(match[1]) : 0;
+}
+
+function parseThreadNumber(threadId: string) {
+	const match = /^thread-(\d+)$/.exec(threadId);
+	return match ? Number(match[1]) : 0;
+}
+
+function parseCommentNumber(commentId: string) {
+	const match = /^comment-(\d+)$/.exec(commentId);
 	return match ? Number(match[1]) : 0;
 }
 
@@ -166,6 +182,29 @@ export function createReviewSessionStore() {
 			serverById.delete(reviewSessionId);
 		},
 	};
+}
+
+export function appendThread(
+	session: ReviewSession,
+	input: { path: string; body: string; line?: ReviewSession["threads"][number]["root"]["line"] },
+) {
+	const thread = {
+		id: `thread-${session.nextThreadId++}`,
+		path: input.path,
+		root: {
+			id: `comment-${session.nextCommentId++}`,
+			path: input.path,
+			body: input.body,
+			status: "open" as const,
+			line: input.line,
+		},
+		replies: [],
+	};
+	if (!session.files.some((file) => file.path === input.path)) {
+		session.files.push({ path: input.path });
+	}
+	session.threads.push(thread);
+	return thread;
 }
 
 export async function submitReview(session: ReviewSession, injectMessage: (prompt: string, round: ReviewSubmissionRound) => Promise<void> | void) {

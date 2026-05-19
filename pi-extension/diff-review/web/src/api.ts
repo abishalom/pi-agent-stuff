@@ -3,7 +3,9 @@ import type {
 	DiffFileDetail,
 	DiffMode,
 	DiffTree,
+	LineAnchor,
 	ReviewReply,
+	ReviewThread,
 	SessionClosedEvent,
 	SessionStateEvent,
 } from "./types.ts";
@@ -43,6 +45,14 @@ export function setDiffMode(requestedMode: DiffMode) {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ requestedMode }),
+	});
+}
+
+export function createThread(path: string, body: string, line?: LineAnchor) {
+	return requestJson<{ thread: ReviewThread }>("/api/threads", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ path, body, line }),
 	});
 }
 

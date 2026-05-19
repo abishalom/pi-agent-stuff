@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+	appendThread,
 	completeSubmissionRound,
 	createReviewSessionStore,
 	submitReview,
@@ -275,4 +276,28 @@ test("recordReply appends the reply into the target thread state", async () => {
 	});
 
 	assert.equal(session.threads[0].replies.at(-1)?.reply, "Looks good");
+});
+
+test("appendThread persists a new open thread and tracks its file path", () => {
+	const store = createReviewSessionStore();
+	const session = store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		serverSecret: "secret-1",
+		diffMode: "working-tree-vs-head",
+		files: [],
+		threads: [],
+	});
+
+	const thread = appendThread(session, {
+		path: "src/a.ts",
+		body: "Please review this change",
+		line: { startLine: 4, endLine: 6, targetSide: "new" },
+	});
+
+	assert.equal(thread.id, "thread-1");
+	assert.equal(thread.root.id, "comment-1");
+	assert.equal(thread.root.status, "open");
+	assert.equal(session.files.at(-1)?.path, "src/a.ts");
+	assert.equal(session.threads.at(-1)?.root.body, "Please review this change");
 });

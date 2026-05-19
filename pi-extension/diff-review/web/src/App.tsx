@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { connectEvents, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
+import { connectEvents, createThread, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
 import { DiffToolbar } from "./components/DiffToolbar.tsx";
 import { DiffViewer } from "./components/DiffViewer.tsx";
 import { FilterBar } from "./components/FilterBar.tsx";
@@ -124,7 +124,19 @@ export function App() {
 				pending={Boolean(sessionState.pendingSubmission)}
 				onStartDraft={() => sessionState.startDraft({ path: sessionState.selectedPath ?? sessionState.paths[0] ?? "", startLine: 1, endLine: 1, targetSide: "new" })}
 				onDraftChange={(text) => sessionState.updateDraftText(text)}
-				onSaveDraft={() => sessionState.commitDraftToThread()}
+				onSaveDraft={async () => {
+					try {
+						if (!sessionState.draft) return;
+						const { thread } = await createThread(
+							sessionState.draft.anchor.path,
+							sessionState.draft.text,
+							sessionState.draft.anchor,
+						);
+						sessionState.commitDraftToThread(thread);
+					} catch (error) {
+						sessionState.applyConnectionError(error instanceof Error ? error.message : String(error));
+					}
+				}}
 			/>}
 		/>
 	);

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { createDiffProvider } from "./git.ts";
-import { completeSubmissionRound, submitReview } from "./state.ts";
+import { appendThread, completeSubmissionRound, submitReview } from "./state.ts";
 import type { ReviewSession } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
@@ -58,6 +58,16 @@ function getSecret(url: URL) {
 
 function isAuthorized(url: URL, serverSecret: string) {
 	return getSecret(url) === serverSecret;
+}
+
+function isValidLineReference(line: unknown): line is { startLine: number; endLine: number; targetSide: "old" | "new" } {
+	if (line == null || typeof line !== "object") return false;
+	const candidate = line as { startLine?: unknown; endLine?: unknown; targetSide?: unknown };
+	return Number.isInteger(candidate.startLine)
+		&& Number.isInteger(candidate.endLine)
+		&& Number(candidate.startLine) >= 1
+		&& Number(candidate.endLine) >= Number(candidate.startLine)
+		&& (candidate.targetSide === "old" || candidate.targetSide === "new");
 }
 
 async function readJsonBody(req: import("node:http").IncomingMessage) {
@@ -165,6 +175,24 @@ export async function startReviewServer(
 				return await withProvider(session, deps, async (provider) => {
 					json(res, 200, await provider.loadFile(filePath));
 				});
+			}
+			if (req.method === "POST" && url.pathname === "/api/threads") {
+				const body = await readJsonBody(req);
+				if (typeof body.path !== "string" || body.path.trim() === "") {
+					return json(res, 400, { error: "path is required" });
+				}
+				if (typeof body.body !== "string" || body.body.trim() === "") {
+					return json(res, 400, { error: "body is required" });
+				}
+				if (body.line != null && !isValidLineReference(body.line)) {
+					return json(res, 400, { error: "invalid line reference" });
+				}
+				const thread = appendThread(session, {
+					path: body.path.trim(),
+					body: body.body.trim(),
+					line: body.line,
+				});
+				return json(res, 200, { thread });
 			}
 			if (req.method === "POST" && url.pathname === "/api/diff-mode") {
 				const body = await readJsonBody(req);

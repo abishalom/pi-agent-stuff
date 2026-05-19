@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
+import { createRepoTreeModelKey } from "../../pi-extension/diff-review/web/src/state/repo-tree.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "../..");
@@ -126,6 +127,19 @@ test("frontend review-session state can refresh changed-tree data after diff-mod
 	assert.deepEqual(state.getVisiblePaths(), ["src/b.ts"]);
 	assert.deepEqual(state.changedFiles, [{ path: "src/b.ts", status: "modified" }]);
 	assert.equal(state.selectedPath, "src/b.ts");
+});
+
+test("repo tree model key changes when the visible path set changes", () => {
+	const fullRepoKey = createRepoTreeModelKey(
+		["README.md", "src/a.ts"],
+		[{ path: "src/a.ts", status: "modified" }],
+	);
+	const changedOnlyKey = createRepoTreeModelKey(
+		["src/a.ts"],
+		[{ path: "src/a.ts", status: "modified" }],
+	);
+
+	assert.notEqual(fullRepoKey, changedOnlyKey);
 });
 
 test("verify:diff-review-web fails when committed static assets drift", async () => {

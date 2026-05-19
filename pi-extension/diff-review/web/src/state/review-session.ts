@@ -65,9 +65,9 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.draft = null;
 			state.emit();
 		},
-		commitDraftToThread() {
+		commitDraftToThread(thread?: ReviewThread | null) {
 			if (!state.draft || !state.draft.text.trim()) return null;
-			const thread: ReviewThread = {
+			const nextThread: ReviewThread = thread ?? {
 				id: `local-thread-${Date.now()}`,
 				path: state.draft.anchor.path,
 				root: {
@@ -79,10 +79,13 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 				},
 				replies: [],
 			};
-			state.threads = [...state.threads, thread];
+			if (!state.files.some((file) => file.path === nextThread.path)) {
+				state.files = [...state.files, { path: nextThread.path }];
+			}
+			state.threads = [...state.threads, nextThread];
 			state.draft = null;
 			state.emit();
-			return thread;
+			return nextThread;
 		},
 		applyBootstrap(next: BootstrapPayload) {
 			state.reviewSessionId = next.reviewSessionId;

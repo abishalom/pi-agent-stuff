@@ -99,6 +99,8 @@ export type ReviewSession = {
 	pendingSubmission: ReviewSubmissionRound | null;
 	submissionHistory: ReviewSubmissionRound[];
 	nextSubmissionRound: number;
+	nextThreadId: number;
+	nextCommentId: number;
 	nextReplyId: number;
 };
 
