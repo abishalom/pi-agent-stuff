@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -143,6 +143,28 @@ test("/diff-review reuses an existing session for the same repo", async (t) => {
 	assert.equal(createdServerCount, 1);
 	assert.equal(ctx.notifications.length, 2);
 	assert.match(ctx.notifications[0].message, /127\.0\.0\.1/);
+});
+
+test("/diff-review creates a different session for a different repo in the same Pi session", async (t) => {
+	const repoA = await createTempRepoFixture();
+	const repoB = await createTempRepoFixture();
+	t.after(() => repoA.cleanup());
+	t.after(() => repoB.cleanup());
+	const pi = createFakePi();
+	const startedSessions = [];
+	createDiffReviewExtension({
+		startServer: async (session) => {
+			startedSessions.push({ reviewSessionId: session.reviewSessionId, repoRoot: session.repoRoot });
+			return { baseUrl: `http://127.0.0.1:${4300 + startedSessions.length}`, close: async () => {} };
+		},
+	})(pi);
+
+	await pi.commands.get("diff-review").handler("", makeCommandContext({ piSessionKey: "s1", cwd: repoA.root }));
+	await pi.commands.get("diff-review").handler("", makeCommandContext({ piSessionKey: "s1", cwd: repoB.root }));
+
+	assert.equal(startedSessions.length, 2);
+	assert.notEqual(startedSessions[0].reviewSessionId, startedSessions[1].reviewSessionId);
+	assert.deepEqual(startedSessions.map((session) => session.repoRoot), [repoA.root, repoB.root]);
 });
 
 test("/diff-review concurrent reuse creates only one server when handlers overlap", async (t) => {
@@ -298,4 +320,16 @@ test("reply tool rejects malformed or unknown payloads", async () => {
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", line: { startLine: 6, endLine: 4, targetSide: "new" }, reply: "x" }), /line/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/other.ts", reply: "x" }), /path/i);
 	await assert.rejects(() => recordReply(store, { reviewSessionId: session.reviewSessionId, submissionRoundId: "round-1", threadId: "thread-1", path: "src/a.ts", line: { startLine: 9, endLine: 10, targetSide: "new" }, reply: "x" }), /line/i);
+});
+
+test("README documents /diff-review session scope and local build", async () => {
+	const readme = await readFile(path.resolve(import.meta.dirname, "../../README.md"), "utf8");
+	assert.match(readme, /\/diff-review/);
+	assert.match(readme, /session-scoped/i);
+	assert.match(readme, /127\.0\.0\.1|loopback|localhost/i);
+	assert.match(readme, /same-session|same session/i);
+	assert.match(readme, /same-repo|same repo/i);
+	assert.match(readme, /ephemeral/i);
+	assert.match(readme, /build:diff-review-web/);
+	assert.match(readme, /verify:diff-review-web/);
 });

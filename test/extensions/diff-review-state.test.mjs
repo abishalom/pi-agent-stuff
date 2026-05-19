@@ -235,3 +235,44 @@ test("restored sessions derive the next reply id after the max existing reply id
 
 	assert.equal(reply.id, "reply-9");
 });
+
+test("recordReply appends the reply into the target thread state", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create({
+		piSessionKey: "s1",
+		repoRoot: "/repo-a",
+		serverSecret: "secret-1",
+		diffMode: "working-tree-vs-head",
+		files: [{ path: "src/a.ts" }],
+		pendingSubmission: {
+			id: "round-1",
+			reviewSessionId: "review-session-1",
+			threadIds: ["thread-1"],
+		},
+		threads: [
+			{
+				id: "thread-1",
+				path: "src/a.ts",
+				root: {
+					id: "comment-1",
+					path: "src/a.ts",
+					body: "Please review this change",
+					status: "submitted",
+					line: { startLine: 4, endLine: 6, targetSide: "new" },
+				},
+				replies: [],
+			},
+		],
+	});
+
+	await recordReply(store, {
+		reviewSessionId: session.reviewSessionId,
+		submissionRoundId: "round-1",
+		threadId: "thread-1",
+		path: "src/a.ts",
+		line: { startLine: 4, endLine: 6, targetSide: "new" },
+		reply: "Looks good",
+	});
+
+	assert.equal(session.threads[0].replies.at(-1)?.reply, "Looks good");
+});

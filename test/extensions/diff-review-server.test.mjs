@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
 import { startReviewServer } from "../../pi-extension/diff-review/server.ts";
+import { shutdownSessionsForPiSessionKey } from "../../pi-extension/diff-review/cleanup.ts";
 
 class UnexpectedHeadError extends Error {
 	constructor() {
@@ -107,6 +108,7 @@ async function startTestServer(repoRoot, overrides = {}) {
 		createDiffProvider: overrides.createDiffProvider,
 		beforeSubmit: overrides.beforeSubmit,
 	});
+	store.attachServer(session.reviewSessionId, server);
 	return { ...server, store, session, sentPrompts };
 }
 
@@ -140,6 +142,42 @@ async function postJson(url, body = {}) {
 		req.on("error", reject);
 		req.end(JSON.stringify(body));
 	});
+}
+
+function createSseReader(stream) {
+	const reader = stream.getReader();
+	let buffered = "";
+	const events = [];
+
+	async function readUntil(predicate) {
+		while (true) {
+			while (events.length > 0) {
+				const event = events.shift();
+				if (predicate(event)) return event;
+			}
+			const { value, done } = await reader.read();
+			if (done) {
+				throw new Error("SSE stream ended before expected event");
+			}
+			buffered += Buffer.from(value).toString("utf8");
+			let index = buffered.indexOf("\n\n");
+			while (index >= 0) {
+				const block = buffered.slice(0, index);
+				buffered = buffered.slice(index + 2);
+				const event = /event: (.+)/.exec(block)?.[1];
+				const data = /data: (.+)/.exec(block)?.[1];
+				if (event && data) events.push({ event, data: JSON.parse(data) });
+				index = buffered.indexOf("\n\n");
+			}
+		}
+	}
+
+	return {
+		readUntil,
+		cancel() {
+			return reader.cancel();
+		},
+	};
 }
 
 test("GET / serves built diff review shell from static assets", async (t) => {
@@ -347,25 +385,7 @@ test("SSE emits reply and session-state events", async (t) => {
 
 	const response = await fetch(`${started.baseUrl}/api/events?secret=${started.session.serverSecret}`);
 	assert.equal(response.status, 200);
-	const reader = response.body.getReader();
-	const events = [];
-	let buffered = "";
-	const readUntil = async (count) => {
-		while (events.length < count) {
-			const { value, done } = await reader.read();
-			assert.equal(done, false);
-			buffered += Buffer.from(value).toString("utf8");
-			let index = buffered.indexOf("\n\n");
-			while (index >= 0) {
-				const block = buffered.slice(0, index);
-				buffered = buffered.slice(index + 2);
-				const event = /event: (.+)/.exec(block)?.[1];
-				const data = /data: (.+)/.exec(block)?.[1];
-				if (event && data) events.push({ event, data: JSON.parse(data) });
-				index = buffered.indexOf("\n\n");
-			}
-		}
-	};
+	const sse = createSseReader(response.body);
 
 	await fetch(`${started.baseUrl}/api/submit?secret=${started.session.serverSecret}`, {
 		method: "POST",
@@ -383,9 +403,27 @@ test("SSE emits reply and session-state events", async (t) => {
 		reply: "Looks good",
 	});
 
-	await readUntil(3);
-	assert.ok(events.some((event) => event.event === "session-state" && event.data.pendingSubmission?.id === "round-1"));
-	assert.ok(events.some((event) => event.event === "session-state" && event.data.pendingSubmission === null));
-	assert.ok(events.some((event) => event.event === "reply" && event.data.reply === "Looks good"));
-	await reader.cancel();
+	const openState = await sse.readUntil((event) => event.event === "session-state" && event.data.pendingSubmission?.id === "round-1");
+	const clearedState = await sse.readUntil((event) => event.event === "session-state" && event.data.pendingSubmission === null);
+	const replyEvent = await sse.readUntil((event) => event.event === "reply" && event.data.reply === "Looks good");
+	assert.equal(openState.data.pendingSubmission.id, "round-1");
+	assert.equal(clearedState.data.pendingSubmission, null);
+	assert.equal(replyEvent.data.reply, "Looks good");
+	await sse.cancel();
+});
+
+test("session shutdown broadcasts session-closed to stale browser tabs", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root);
+
+	const response = await fetch(`${started.baseUrl}/api/events?secret=${started.session.serverSecret}`);
+	assert.equal(response.status, 200);
+	const sse = createSseReader(response.body);
+	await sse.readUntil((event) => event.event === "session-state");
+
+	await shutdownSessionsForPiSessionKey(started.store, "s1");
+	const closedEvent = await sse.readUntil((event) => event.event === "session-closed");
+	assert.equal(closedEvent.data.reviewSessionId, started.session.reviewSessionId);
+	await sse.cancel().catch(() => {});
 });
