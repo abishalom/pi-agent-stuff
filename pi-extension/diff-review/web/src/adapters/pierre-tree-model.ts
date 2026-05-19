@@ -1,4 +1,4 @@
-import { preparePresortedFileTreeInput } from "@pierre/trees";
+import { prepareFileTreeInput } from "@pierre/trees";
 import type { FileTreePreparedInput, GitStatusEntry } from "@pierre/trees";
 import type { DiffTreeEntry } from "../types.ts";
 
@@ -10,7 +10,7 @@ export function toPierreGitStatus(changedFiles: DiffTreeEntry[]): GitStatusEntry
 }
 
 export function prepareTreeInput(paths: string[]): FileTreePreparedInput {
-	return preparePresortedFileTreeInput(paths);
+	return prepareFileTreeInput(paths);
 }
 
 export function syncPierreTreeModel(

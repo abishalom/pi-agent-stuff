@@ -216,6 +216,22 @@ test("syncPierreTreeModel mutates the Pierre tree model instead of relying on re
 	]);
 });
 
+test("prepareTreeInput stays compatible with FileTree resetPaths for unsorted path lists", async () => {
+	const { FileTree } = await import("@pierre/trees");
+	const { prepareTreeInput, syncPierreTreeModel } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+	const paths = ["src/b.ts", "README.md", "src/a.ts"];
+	const preparedInput = prepareTreeInput(paths);
+	const model = new FileTree({ preparedInput, initialExpansion: "open" });
+	assert.doesNotThrow(() => {
+		syncPierreTreeModel(model, {
+			paths,
+			changedFiles: [{ path: "src/a.ts", status: "modified" }],
+			selectedPath: "src/a.ts",
+			preparedInput,
+		});
+	});
+});
+
 test("toPierreGitStatus maps binary entries to modified for Pierre git-status rendering", async () => {
 	const { toPierreGitStatus } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
 	assert.deepEqual(toPierreGitStatus([
