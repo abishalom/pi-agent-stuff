@@ -1,5 +1,7 @@
 import type { DraftComment, LineAnchor, ReviewThread } from "./types.ts";
 
+export type ButtonVariant = "primary" | "secondary" | "ghost";
+
 export function getSubmitButtonLabel(pending: boolean) {
 	return pending ? "Waiting for Pi…" : "Submit feedback";
 }
@@ -67,8 +69,85 @@ export function getThreadCardLayout(collapsed: boolean, isFocused: boolean) {
 		boxShadow: isFocused ? "0 0 0 1px rgba(37,99,235,0.2)" : undefined,
 		gap: collapsed ? 6 : 10,
 		headerGap: collapsed ? 8 : 10,
+		height: collapsed ? 88 : undefined,
+		overflow: collapsed ? "hidden" : "visible",
 		padding: collapsed ? 10 : 12,
 		showCollapsedSummary: collapsed,
+		summaryLineClamp: collapsed ? 2 : undefined,
+		toggleButtonSize: 32,
+	};
+}
+
+export function getButtonStyle(variant: ButtonVariant, options?: { disabled?: boolean; fullWidth?: boolean; compact?: boolean }) {
+	const disabled = options?.disabled === true;
+	const compact = options?.compact === true;
+	const base = {
+		appearance: "none",
+		alignItems: "center",
+		borderRadius: compact ? 10 : 12,
+		border: "1px solid #334155",
+		cursor: disabled ? "not-allowed" : "pointer",
+		display: "inline-flex",
+		fontSize: 13,
+		fontWeight: 600,
+		height: compact ? 32 : 36,
+		justifyContent: "center",
+		lineHeight: 1,
+		outline: "none",
+		padding: compact ? "0 10px" : "0 12px",
+		transition: "background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease",
+		width: options?.fullWidth ? "100%" : undefined,
+	};
+	if (variant === "primary") {
+		return {
+			...base,
+			background: disabled ? "#1e293b" : "#2563eb",
+			borderColor: disabled ? "#334155" : "#3b82f6",
+			color: disabled ? "#94a3b8" : "#f8fafc",
+		};
+	}
+	if (variant === "ghost") {
+		return {
+			...base,
+			background: "transparent",
+			borderColor: "#1e293b",
+			color: disabled ? "#64748b" : "#cbd5e1",
+		};
+	}
+	return {
+		...base,
+		background: "#0f172a",
+		borderColor: "#334155",
+		color: disabled ? "#64748b" : "#e2e8f0",
+	};
+}
+
+export function getSelectStyle() {
+	return {
+		appearance: "none",
+		background: "#0f172a",
+		border: "1px solid #334155",
+		borderRadius: 12,
+		color: "#e2e8f0",
+		height: 36,
+		outline: "none",
+		padding: "0 36px 0 12px",
+	};
+}
+
+export function getTextFieldStyle(options?: { minHeight?: number }) {
+	return {
+		background: "#020617",
+		border: "1px solid #334155",
+		borderRadius: 12,
+		color: "#e2e8f0",
+		font: "inherit",
+		lineHeight: 1.5,
+		minHeight: options?.minHeight,
+		outline: "none",
+		padding: "10px 12px",
+		resize: "vertical",
+		width: "100%",
 	};
 }
 

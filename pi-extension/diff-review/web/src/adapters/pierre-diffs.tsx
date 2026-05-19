@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from "react";
 import { File, MultiFileDiff } from "@pierre/diffs/react";
 import type { DiffFileDetail, LineAnchor, ReviewThread } from "../types.ts";
-import { getGutterCommentLabel } from "../ui.ts";
+import { getButtonStyle, getGutterCommentLabel } from "../ui.ts";
 import type { AnnotationMetadata } from "./diff-review-annotations.ts";
 import { buildDiffLineAnnotations, buildFileLineAnnotations } from "./diff-review-annotations.ts";
 import { anchorToSelectedLines, hoveredLineToAnchor, selectionRangeToAnchor } from "./pierre-diffs.ts";
@@ -18,14 +18,12 @@ function renderAnnotationButton(
 			onClick={() => onFocusThread?.(annotation.metadata.threadIds[0])}
 			aria-label={`Open ${annotation.metadata.count} thread(s) on line ${annotation.lineNumber}`}
 			style={{
+				...getButtonStyle(isFocused ? "primary" : "secondary", { compact: true }),
 				borderRadius: 999,
-				padding: "0 6px",
-				background: isFocused ? "#2563eb" : "#1e293b",
-				color: "#f8fafc",
-				border: "1px solid #334155",
 				fontSize: 12,
-				lineHeight: "20px",
+				height: 24,
 				minWidth: 24,
+				padding: "0 6px",
 			}}
 		>
 			{annotation.metadata.count}
@@ -41,13 +39,12 @@ function renderGutterButton(anchor: LineAnchor | null, onSelectAnchor?: (anchor:
 			onClick={() => onSelectAnchor?.(anchor)}
 			aria-label={`Add comment on ${anchor.path}:${anchor.startLine}`}
 			style={{
-				width: 22,
-				height: 22,
+				...getButtonStyle("secondary", { compact: true }),
+				width: 24,
+				height: 24,
 				borderRadius: 999,
-				border: "1px solid #334155",
-				background: "#0f172a",
-				color: "#f8fafc",
 				fontWeight: 700,
+				padding: 0,
 			}}
 		>
 			{getGutterCommentLabel()}

@@ -9,8 +9,11 @@ import { promisify } from "node:util";
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
 import {
 	getActiveDiffAnchor,
+	getButtonStyle,
 	getComposerIdleActions,
+	getSelectStyle,
 	getSubmitButtonLabel,
+	getTextFieldStyle,
 	getThreadCardLayout,
 	reuseShallowEqualArray,
 } from "../../pi-extension/diff-review/web/src/ui.ts";
@@ -223,6 +226,23 @@ test("getThreadCardLayout makes collapsed cards meaningfully smaller than expand
 	assert.ok(collapsed.gap < expanded.gap);
 	assert.equal(collapsed.showCollapsedSummary, true);
 	assert.equal(expanded.showCollapsedSummary, false);
+	assert.equal(collapsed.height, 88);
+	assert.equal(expanded.height, undefined);
+	assert.ok(collapsed.toggleButtonSize > 24);
+});
+
+test("shared control styles keep buttons, selects, and text fields on-theme", () => {
+	const primaryButton = getButtonStyle("primary");
+	const secondaryButton = getButtonStyle("secondary");
+	const disabledButton = getButtonStyle("primary", { disabled: true });
+	const select = getSelectStyle();
+	const textarea = getTextFieldStyle({ minHeight: 88 });
+	assert.equal(primaryButton.background, "#2563eb");
+	assert.equal(secondaryButton.background, "#0f172a");
+	assert.equal(disabledButton.cursor, "not-allowed");
+	assert.equal(select.background, "#0f172a");
+	assert.equal(textarea.minHeight, 88);
+	assert.equal(textarea.color, "#e2e8f0");
 });
 
 test("syncPierreTreeModel mutates the Pierre tree model instead of relying on remount keys", async () => {

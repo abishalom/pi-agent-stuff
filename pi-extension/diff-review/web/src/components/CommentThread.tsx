@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DraftComment, ReviewThread } from "../types.ts";
-import { buildThreadTimeline, formatAnchor, formatDraftLabel, getThreadCardLayout } from "../ui.ts";
+import { buildThreadTimeline, formatAnchor, formatDraftLabel, getButtonStyle, getTextFieldStyle, getThreadCardLayout } from "../ui.ts";
 
 function truncate(text: string, maxLength = 72) {
 	return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
@@ -59,6 +59,8 @@ export function CommentThread({
 				padding: layout.padding,
 				display: "grid",
 				gap: layout.gap,
+				height: layout.height,
+				overflow: layout.overflow,
 				background: layout.background,
 				boxShadow: layout.boxShadow,
 				cursor: "pointer",
@@ -71,14 +73,33 @@ export function CommentThread({
 						onToggleCollapsed();
 					}}
 					aria-label={collapsed ? "Expand thread" : "Collapse thread"}
-					style={{ width: 24, height: 24 }}
+					style={{
+						...getButtonStyle("secondary", { compact: true }),
+						width: layout.toggleButtonSize,
+						height: layout.toggleButtonSize,
+						padding: 0,
+						fontSize: 18,
+						fontWeight: 700,
+					}}
 				>
 					{collapsed ? "+" : "-"}
 				</button>
 				<div style={{ minWidth: 0, display: "grid", gap: collapsed ? 4 : 6 }}>
 					<div style={{ fontSize: 12, color: "#94a3b8" }}>{thread.path}{anchor ? `:${anchor}` : ""}</div>
 					{layout.showCollapsedSummary ? (
-						<div style={{ color: "#e2e8f0", fontSize: 13, lineHeight: 1.35 }}>{summary}</div>
+						<div
+							style={{
+								color: "#e2e8f0",
+								fontSize: 13,
+								lineHeight: 1.35,
+								overflow: "hidden",
+								display: "-webkit-box",
+								WebkitBoxOrient: "vertical",
+								WebkitLineClamp: layout.summaryLineClamp,
+							}}
+						>
+							{summary}
+						</div>
 					) : null}
 				</div>
 				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -93,6 +114,7 @@ export function CommentThread({
 								event.stopPropagation();
 								onStartReply();
 							}}
+							style={getButtonStyle("secondary", { compact: true })}
 						>
 							Reply
 						</button>
@@ -102,6 +124,7 @@ export function CommentThread({
 								event.stopPropagation();
 								onCancelReply();
 							}}
+							style={getButtonStyle("ghost", { compact: true })}
 						>
 							Cancel
 						</button>
@@ -124,8 +147,8 @@ export function CommentThread({
 					{replyDraft?.kind === "reply" ? (
 						<div style={{ display: "grid", gap: 8, paddingTop: 4 }} onClick={(event) => event.stopPropagation()}>
 							<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(replyDraft)}</div>
-							<textarea rows={3} value={replyDraft.text} onChange={(event) => onReplyChange(event.target.value)} />
-							<button onClick={onSaveReply} disabled={!replyDraft.text.trim()}>Add reply</button>
+							<textarea rows={3} value={replyDraft.text} onChange={(event) => onReplyChange(event.target.value)} style={getTextFieldStyle({ minHeight: 88 })} />
+							<button onClick={onSaveReply} disabled={!replyDraft.text.trim()} style={getButtonStyle("primary", { disabled: !replyDraft.text.trim() })}>Add reply</button>
 						</div>
 					) : null}
 				</>

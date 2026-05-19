@@ -1,5 +1,5 @@
 import type { DraftComment } from "../types.ts";
-import { formatDraftLabel, getComposerIdleActions, getGutterCommentLabel } from "../ui.ts";
+import { formatDraftLabel, getButtonStyle, getComposerIdleActions, getGutterCommentLabel, getTextFieldStyle } from "../ui.ts";
 
 export function CommentComposer({
 	draft,
@@ -20,9 +20,9 @@ export function CommentComposer({
 			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
 				<strong style={{ color: "#f8fafc" }}>Comment composer</strong>
 				{!draft ? (
-					<button onClick={onStartFileComment}>{getComposerIdleActions()[0]}</button>
+					<button onClick={onStartFileComment} style={getButtonStyle("secondary")}>{getComposerIdleActions()[0]}</button>
 				) : (
-					<button onClick={onCancel}>Cancel</button>
+					<button onClick={onCancel} style={getButtonStyle("ghost")}>Cancel</button>
 				)}
 			</div>
 			{!draft ? (
@@ -32,8 +32,8 @@ export function CommentComposer({
 			) : isThreadDraft ? (
 				<>
 					<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(draft)}</div>
-					<textarea rows={4} value={draft.text} onChange={(event) => onChange(event.target.value)} />
-					<button onClick={onSave} disabled={!draft.text.trim()}>Add thread</button>
+					<textarea rows={4} value={draft.text} onChange={(event) => onChange(event.target.value)} style={getTextFieldStyle({ minHeight: 104 })} />
+					<button onClick={onSave} disabled={!draft.text.trim()} style={getButtonStyle("primary", { disabled: !draft.text.trim() })}>Add thread</button>
 				</>
 			) : (
 				<div style={{ color: "#94a3b8", fontSize: 12 }}>
