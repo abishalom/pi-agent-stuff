@@ -186,15 +186,15 @@ async function listUntrackedPaths(repoRoot: string) {
 
 async function loadChangedEntries(
 	repoRoot: string,
-	spec: { effectiveMode: DiffMode; baseRef?: string },
+	spec: { effectiveMode: DiffMode; baseRef?: string; headRef?: string },
 	readFileImpl: typeof defaultReadFile,
 ) {
 	const diffArgs = spec.effectiveMode === "working-tree-vs-head"
-		? ["diff", "--name-status", "-z", "HEAD"]
-		: ["diff", "--name-status", "-z", spec.baseRef!, "HEAD"];
+		? ["diff", "--name-status", "-z", spec.headRef!]
+		: ["diff", "--name-status", "-z", spec.baseRef!, spec.headRef!];
 	const numstatArgs = spec.effectiveMode === "working-tree-vs-head"
-		? ["diff", "--numstat", "-z", "HEAD"]
-		: ["diff", "--numstat", "-z", spec.baseRef!, "HEAD"];
+		? ["diff", "--numstat", "-z", spec.headRef!]
+		: ["diff", "--numstat", "-z", spec.baseRef!, spec.headRef!];
 	const statusOutput = await runGit(repoRoot, diffArgs);
 	const numstatOutput = await runGit(repoRoot, numstatArgs);
 	const binaryPaths = parseNumstat(numstatOutput.stdout as string);

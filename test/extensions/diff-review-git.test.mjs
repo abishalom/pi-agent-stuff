@@ -126,6 +126,32 @@ test("merge-base mode returns missing for local-only file loads", async (t) => {
 	assert.equal(file.newContent, null);
 });
 
+test("merge-base mode stays anchored to the cached resolved head after HEAD advances", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	await repo.git("checkout", "-qb", "feature/test-cached-head");
+	await repo.write("feature-1.txt", "first feature\n");
+	await repo.commit("feature commit 1");
+	await repo.git("branch", "--set-upstream-to", "master");
+
+	const provider = await createDiffProvider({ repoRoot: repo.root, diffMode: "merge-base-vs-head" });
+	const state = await provider.loadModeState();
+	assert.equal(state.effectiveMode, "merge-base-vs-head");
+
+	await repo.write("feature-2.txt", "second feature\n");
+	await repo.commit("feature commit 2");
+
+	const tree = await provider.loadTree();
+	assert.ok(tree.paths.includes("feature-1.txt"));
+	assert.ok(!tree.paths.includes("feature-2.txt"));
+	assert.ok(tree.changedPaths.includes("feature-1.txt"));
+	assert.ok(!tree.changedPaths.includes("feature-2.txt"));
+
+	const file = await provider.loadFile("feature-2.txt");
+	assert.equal(file.loadError?.code, "missing");
+	assert.equal(file.newContent, null);
+});
+
 test("provider fails clearly outside a git repo", async (t) => {
 	const notRepo = await mkdtemp(path.join(tmpdir(), "diff-review-not-repo-"));
 	t.after(() => rm(notRepo, { recursive: true, force: true }));
