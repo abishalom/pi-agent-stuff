@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DraftComment, ReviewThread } from "../types.ts";
-import { buildThreadTimeline, formatAnchor, formatDraftLabel, getButtonStyle, getTextFieldStyle, getThreadCardLayout } from "../ui.ts";
+import { buildThreadTimeline, formatAnchor, formatDraftLabel, getButtonStyle, getComposerKeyAction, getComposerShortcutHint, getTextFieldStyle, getThreadCardLayout } from "../ui.ts";
 
 function truncate(text: string, maxLength = 72) {
 	return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
@@ -35,6 +35,7 @@ export function CommentThread({
 	const replyCount = timeline.length - 1;
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const layout = getThreadCardLayout(collapsed, isFocused);
+	const shortcutHint = getComposerShortcutHint();
 
 	useEffect(() => {
 		if (!isFocused) return;
@@ -147,7 +148,23 @@ export function CommentThread({
 					{replyDraft?.kind === "reply" ? (
 						<div style={{ display: "grid", gap: 8, paddingTop: 4 }} onClick={(event) => event.stopPropagation()}>
 							<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(replyDraft)}</div>
-							<textarea rows={3} value={replyDraft.text} onChange={(event) => onReplyChange(event.target.value)} style={getTextFieldStyle({ minHeight: 88 })} />
+							<textarea
+								rows={3}
+								value={replyDraft.text}
+								onChange={(event) => onReplyChange(event.target.value)}
+								onKeyDown={(event) => {
+									const action = getComposerKeyAction(event);
+									if (!action) return;
+									event.preventDefault();
+									if (action === "cancel") {
+										onCancelReply();
+										return;
+									}
+									if (replyDraft.text.trim()) onSaveReply();
+								}}
+								style={getTextFieldStyle({ minHeight: 88 })}
+							/>
+							<div style={{ fontSize: 12, color: "#64748b" }}>{shortcutHint}</div>
 							<button onClick={onSaveReply} disabled={!replyDraft.text.trim()} style={getButtonStyle("primary", { disabled: !replyDraft.text.trim() })}>Add reply</button>
 						</div>
 					) : null}

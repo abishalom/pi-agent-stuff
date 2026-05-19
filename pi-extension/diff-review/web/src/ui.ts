@@ -121,6 +121,21 @@ export function getDraftComposerPlacement(draft: DraftComment | null | undefined
 	return draft.line ? "floating" : "sidebar";
 }
 
+export function getComposerKeyAction(event: { key: string; shiftKey?: boolean }) {
+	if (event.key === "Escape") return "cancel";
+	if (event.key === "Enter" && event.shiftKey !== true) return "submit";
+	return null;
+}
+
+export function getComposerShortcutHint() {
+	return "Enter to submit · Shift+Enter for a new line · Esc to cancel";
+}
+
+export function getAnchorScrollKey(anchor: LineAnchor | null | undefined) {
+	if (!anchor) return null;
+	return `${anchor.path}:${anchor.targetSide}:${anchor.startLine}-${anchor.endLine}`;
+}
+
 export function getNextThreadSortMode(mode: ThreadSortMode): ThreadSortMode {
 	if (mode === "creation-desc") return "last-activity-desc";
 	if (mode === "last-activity-desc") return "line-number-asc";

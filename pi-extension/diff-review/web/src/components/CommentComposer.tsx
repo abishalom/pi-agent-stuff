@@ -1,5 +1,5 @@
 import type { DraftComment } from "../types.ts";
-import { formatDraftLabel, getButtonStyle, getComposerIdleActions, getDraftComposerPlacement, getGutterCommentLabel, getTextFieldStyle } from "../ui.ts";
+import { formatDraftLabel, getButtonStyle, getComposerIdleActions, getComposerKeyAction, getComposerShortcutHint, getDraftComposerPlacement, getGutterCommentLabel, getTextFieldStyle } from "../ui.ts";
 
 export function CommentComposer({
 	draft,
@@ -16,6 +16,7 @@ export function CommentComposer({
 }) {
 	const isThreadDraft = draft?.kind === "thread";
 	const placement = getDraftComposerPlacement(draft);
+	const shortcutHint = getComposerShortcutHint();
 	return (
 		<div style={{ padding: 12, borderBottom: "1px solid #1e293b", display: "grid", gap: 8, background: "#0f172a" }}>
 			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -33,7 +34,23 @@ export function CommentComposer({
 			) : isThreadDraft && placement === "sidebar" ? (
 				<>
 					<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(draft)}</div>
-					<textarea rows={4} value={draft.text} onChange={(event) => onChange(event.target.value)} style={getTextFieldStyle({ minHeight: 104 })} />
+					<textarea
+						rows={4}
+						value={draft.text}
+						onChange={(event) => onChange(event.target.value)}
+						onKeyDown={(event) => {
+							const action = getComposerKeyAction(event);
+							if (!action) return;
+							event.preventDefault();
+							if (action === "cancel") {
+								onCancel();
+								return;
+							}
+							if (draft.text.trim()) onSave();
+						}}
+						style={getTextFieldStyle({ minHeight: 104 })}
+					/>
+					<div style={{ fontSize: 12, color: "#64748b" }}>{shortcutHint}</div>
 					<button onClick={onSave} disabled={!draft.text.trim()} style={getButtonStyle("primary", { disabled: !draft.text.trim() })}>Add thread</button>
 				</>
 			) : isThreadDraft ? (

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DraftComment } from "../types.ts";
-import { formatDraftLabel, getButtonStyle, getDraftComposerPlacement, getTextFieldStyle } from "../ui.ts";
+import { formatDraftLabel, getButtonStyle, getComposerKeyAction, getComposerShortcutHint, getDraftComposerPlacement, getTextFieldStyle } from "../ui.ts";
 
 export function FloatingDraftComposer({
 	draft,
@@ -15,6 +15,7 @@ export function FloatingDraftComposer({
 }) {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const isVisible = getDraftComposerPlacement(draft) === "floating";
+	const shortcutHint = getComposerShortcutHint();
 
 	useEffect(() => {
 		if (!isVisible) return;
@@ -51,8 +52,19 @@ export function FloatingDraftComposer({
 				rows={4}
 				value={draft.text}
 				onChange={(event) => onChange(event.target.value)}
+				onKeyDown={(event) => {
+					const action = getComposerKeyAction(event);
+					if (!action) return;
+					event.preventDefault();
+					if (action === "cancel") {
+						onCancel();
+						return;
+					}
+					if (draft.text.trim()) onSave();
+				}}
 				style={getTextFieldStyle({ minHeight: 108 })}
 			/>
+			<div style={{ fontSize: 12, color: "#64748b" }}>{shortcutHint}</div>
 			<button onClick={onSave} disabled={!draft.text.trim()} style={getButtonStyle("primary", { disabled: !draft.text.trim() })}>Add thread</button>
 		</div>
 	);

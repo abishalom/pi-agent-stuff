@@ -9,8 +9,11 @@ import { promisify } from "node:util";
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
 import {
 	getActiveDiffAnchor,
+	getAnchorScrollKey,
 	getButtonStyle,
 	getComposerIdleActions,
+	getComposerKeyAction,
+	getComposerShortcutHint,
 	getDraftComposerPlacement,
 	getNextThreadSortMode,
 	getPaneScrollAreaStyle,
@@ -307,6 +310,24 @@ test("line and range comment drafts use a floating popup while file comments sta
 	assert.equal(getDraftComposerPlacement({ id: "draft-1", kind: "thread", path: "src/a.ts", text: "file" }), "sidebar");
 	assert.equal(getDraftComposerPlacement({ id: "draft-2", kind: "thread", path: "src/a.ts", line: { path: "src/a.ts", startLine: 7, endLine: 8, targetSide: "new" }, text: "line" }), "floating");
 	assert.equal(getDraftComposerPlacement({ id: "draft-3", kind: "reply", threadId: "thread-1", path: "src/a.ts", line: { path: "src/a.ts", startLine: 7, endLine: 7, targetSide: "new" }, text: "reply" }), "thread");
+});
+
+test("composer keyboard actions map Enter to submit, Escape to cancel, and Shift+Enter to newline", () => {
+	assert.equal(getComposerKeyAction({ key: "Enter", shiftKey: false }), "submit");
+	assert.equal(getComposerKeyAction({ key: "Escape", shiftKey: false }), "cancel");
+	assert.equal(getComposerKeyAction({ key: "Enter", shiftKey: true }), null);
+	assert.equal(getComposerKeyAction({ key: "a", shiftKey: false }), null);
+	assert.match(getComposerShortcutHint(), /enter.*submit/i);
+	assert.match(getComposerShortcutHint(), /shift\+enter.*new line/i);
+	assert.match(getComposerShortcutHint(), /esc.*cancel/i);
+});
+
+test("anchor scroll keys stay stable for focused thread jumps", () => {
+	assert.equal(getAnchorScrollKey(null), null);
+	assert.equal(
+		getAnchorScrollKey({ path: "src/a.ts", startLine: 12, endLine: 14, targetSide: "old" }),
+		"src/a.ts:old:12-14",
+	);
 });
 
 test("shared control styles keep buttons, selects, and text fields on-theme", () => {
