@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -86,6 +86,13 @@ function makeReviewSession(repoRoot) {
 	return { store, session };
 }
 
+async function getBuiltShellPaths() {
+	const staticRoot = path.resolve(import.meta.dirname, "../../pi-extension/diff-review/static");
+	const assetRoot = path.join(staticRoot, "assets");
+	const assetNames = await readdir(assetRoot);
+	return { staticRoot, assetNames };
+}
+
 async function startTestServer(repoRoot, overrides = {}) {
 	const { store, session } = makeReviewSession(repoRoot);
 	const sentPrompts = [];
@@ -134,6 +141,21 @@ async function postJson(url, body = {}) {
 		req.end(JSON.stringify(body));
 	});
 }
+
+test("GET / serves built diff review shell from static assets", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root);
+	t.after(() => started.close());
+	const { assetNames } = await getBuiltShellPaths();
+
+	const response = await fetch(`${started.baseUrl}/`);
+	const html = await response.text();
+	assert.equal(response.status, 200);
+	assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+	assert.match(html, /<div id="root"><\/div>/i);
+	assert.ok(assetNames.some((name) => html.includes(`/assets/${name}`)));
+});
 
 test("server binds to loopback and rejects missing secret", async (t) => {
 	const repo = await createTempRepoFixture();

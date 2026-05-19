@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { readFile as defaultReadFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { createDiffProvider } from "./git.ts";
@@ -8,6 +10,7 @@ import { completeSubmissionRound, submitReview } from "./state.ts";
 import type { ReviewSession } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
+const staticRoot = fileURLToPath(new URL("./static/", import.meta.url));
 
 class ReviewServerHttpError extends Error {
 	statusCode: number;
@@ -23,6 +26,30 @@ class ReviewServerHttpError extends Error {
 function json(res: import("node:http").ServerResponse, status: number, body: unknown) {
 	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
 	res.end(JSON.stringify(body));
+}
+
+function sendText(res: import("node:http").ServerResponse, status: number, body: string, contentType: string) {
+	res.writeHead(status, { "content-type": `${contentType}; charset=utf-8` });
+	res.end(body);
+}
+
+function guessContentType(filePath: string) {
+	if (filePath.endsWith(".html")) return "text/html";
+	if (filePath.endsWith(".js")) return "text/javascript";
+	if (filePath.endsWith(".css")) return "text/css";
+	if (filePath.endsWith(".json")) return "application/json";
+	if (filePath.endsWith(".svg")) return "image/svg+xml";
+	return "text/plain";
+}
+
+async function serveStaticAsset(res: import("node:http").ServerResponse, pathname: string) {
+	const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
+	const resolvedPath = path.resolve(staticRoot, relativePath);
+	if (!resolvedPath.startsWith(staticRoot)) {
+		return json(res, 404, { error: "not found" });
+	}
+	const body = await defaultReadFile(resolvedPath, "utf8");
+	sendText(res, 200, body, guessContentType(resolvedPath));
 }
 
 function getSecret(url: URL) {
@@ -104,6 +131,9 @@ export async function startReviewServer(
 	const server = createServer(async (req, res) => {
 		try {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
+			if ((req.method === "GET" && url.pathname === "/") || (req.method === "GET" && url.pathname.startsWith("/assets/"))) {
+				return await serveStaticAsset(res, url.pathname);
+			}
 			if (url.pathname.startsWith("/api/") && !isAuthorized(url, session.serverSecret)) {
 				return json(res, 403, { error: "invalid review secret" });
 			}
@@ -120,8 +150,8 @@ export async function startReviewServer(
 			}
 			if (req.method === "GET" && url.pathname === "/api/session") {
 				return await withProvider(session, deps, async (provider) => {
-					const mode = await provider.loadModeState();
-					json(res, 200, { ...toSessionState(session), ...mode });
+					const [mode, tree] = await Promise.all([provider.loadModeState(), provider.loadTree()]);
+					json(res, 200, { ...toSessionState(session), ...mode, ...tree, files: session.files, threads: session.threads });
 				});
 			}
 			if (req.method === "GET" && url.pathname === "/api/tree") {

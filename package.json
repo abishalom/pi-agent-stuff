@@ -30,8 +30,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "build:diff-review-web": "node -e \"console.error('build:diff-review-web not implemented yet (Task 5 will add the real pipeline)'); process.exit(1)\"",
-    "verify:diff-review-web": "node -e \"console.error('verify:diff-review-web not implemented yet (Task 5 will add the real pipeline)'); process.exit(1)\""
+    "build:diff-review-web": "node ./pi-extension/diff-review/web/build-static.mjs",
+    "verify:diff-review-web": "node ./pi-extension/diff-review/web/verify-static.mjs"
   },
   "dependencies": {
     "@pierre/diffs": "^1.1.22",
