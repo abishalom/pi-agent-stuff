@@ -120,7 +120,16 @@ export function createDiffReviewReplyTool(store: {
 			reply: Type.String(),
 		}),
 		async execute(_toolCallId: string, params: DiffReviewReplyParams) {
-			return recordReply(store, params);
+			const recordedReply = await recordReply(store, params);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Recorded diff review reply ${recordedReply.id} for ${recordedReply.path}.`,
+					},
+				],
+				details: recordedReply,
+			};
 		},
 	});
 }

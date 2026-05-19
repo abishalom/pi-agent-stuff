@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
-import { recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
+import { createDiffReviewReplyTool, recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
 import { createDiffReviewExtension } from "../../pi-extension/diff-review/index.ts";
 import { shutdownSessionsForPiSessionKey } from "../../pi-extension/diff-review/cleanup.ts";
 
@@ -303,6 +303,28 @@ test("reply tool accepts thread target with path and optional line reference", a
 	});
 	assert.equal(result.path, "src/a.ts");
 	assert.equal(result.line?.startLine, 4);
+});
+
+
+test("reply tool execute returns a Pi tool result envelope", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create(makeSessionSeed());
+	const tool = createDiffReviewReplyTool(store);
+
+	const result = await tool.execute("tool-call-1", {
+		reviewSessionId: session.reviewSessionId,
+		submissionRoundId: "round-1",
+		threadId: "thread-1",
+		path: "src/a.ts",
+		line: { startLine: 4, endLine: 6, targetSide: "new" },
+		reply: "Looks good",
+	});
+
+	assert.ok(Array.isArray(result.content));
+	assert.equal(result.content[0]?.type, "text");
+	assert.match(result.content[0]?.text ?? "", /src\/a\.ts/);
+	assert.equal(result.details.path, "src/a.ts");
+	assert.equal(result.details.reply, "Looks good");
 });
 
 test("reply tool rejects malformed or unknown payloads", async () => {
