@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
-import { getSubmitButtonLabel, getComposerIdleActions } from "../../pi-extension/diff-review/web/src/ui.ts";
+import { getSubmitButtonLabel, getComposerIdleActions, reuseShallowEqualArray } from "../../pi-extension/diff-review/web/src/ui.ts";
 import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
 
 const execFileAsync = promisify(execFile);
@@ -179,6 +179,19 @@ test("frontend review-session state can focus a thread and sync the selected fil
 	state.focusThread("thread-1");
 	assert.equal(state.focusedThreadId, "thread-1");
 	assert.equal(state.selectedPath, "src/a.ts");
+});
+
+test("reuseShallowEqualArray preserves selected thread identity across unrelated draft edits", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	state.selectPath("src/a.ts");
+	const previous = state.getThreadsForSelectedPath();
+	state.startFileDraft("src/a.ts");
+	state.updateDraftText("Unrelated draft text");
+	const next = state.getThreadsForSelectedPath();
+	assert.notEqual(next, previous);
+	assert.equal(reuseShallowEqualArray(previous, next), previous);
+	const expanded = [...next, next[0]];
+	assert.equal(reuseShallowEqualArray(previous, expanded), expanded);
 });
 
 test("syncPierreTreeModel mutates the Pierre tree model instead of relying on remount keys", async () => {

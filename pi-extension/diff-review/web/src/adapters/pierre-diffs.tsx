@@ -1,3 +1,4 @@
+import { memo, useCallback, useMemo } from "react";
 import { File, MultiFileDiff } from "@pierre/diffs/react";
 import type { DiffFileDetail, LineAnchor, ReviewThread } from "../types.ts";
 import { getGutterCommentLabel } from "../ui.ts";
@@ -54,7 +55,7 @@ function renderGutterButton(anchor: LineAnchor | null, onSelectAnchor?: (anchor:
 	);
 }
 
-export function PierreDiffView({
+export const PierreDiffView = memo(function PierreDiffView({
 	detail,
 	threads,
 	focusedThreadId,
@@ -69,43 +70,86 @@ export function PierreDiffView({
 	onSelectAnchor?(anchor: LineAnchor | null): void;
 	onFocusThread?(threadId: string): void;
 }) {
+	const selectedLines = useMemo(
+		() => selectedAnchor?.path === detail.path ? anchorToSelectedLines(selectedAnchor) : null,
+		[detail.path, selectedAnchor],
+	);
+	const fileThreads = useMemo(
+		() => threads.filter((thread) => thread.path === detail.path && thread.root.line),
+		[detail.path, threads],
+	);
+	const renderAnnotation = useCallback(
+		(annotation: { lineNumber: number; metadata: AnnotationMetadata }) => renderAnnotationButton(annotation, focusedThreadId, onFocusThread),
+		[focusedThreadId, onFocusThread],
+	);
+	const renderDiffGutterUtility = useCallback(
+		(getHoveredLine: () => Parameters<typeof hoveredLineToAnchor>[1]) => renderGutterButton(hoveredLineToAnchor(detail.path, getHoveredLine()), onSelectAnchor),
+		[detail.path, onSelectAnchor],
+	);
+	const renderFileGutterUtility = useCallback(
+		(getHoveredLine: () => Parameters<typeof hoveredLineToAnchor>[1]) => renderGutterButton(hoveredLineToAnchor(detail.path, getHoveredLine(), "new"), onSelectAnchor),
+		[detail.path, onSelectAnchor],
+	);
+	const handleDiffLineSelected = useCallback(
+		(range: Parameters<typeof selectionRangeToAnchor>[1]) => onSelectAnchor?.(selectionRangeToAnchor(detail.path, range)),
+		[detail.path, onSelectAnchor],
+	);
+	const handleFileLineSelected = useCallback(
+		(range: Parameters<typeof selectionRangeToAnchor>[1]) => onSelectAnchor?.(selectionRangeToAnchor(detail.path, range, "new")),
+		[detail.path, onSelectAnchor],
+	);
+	const oldFile = useMemo(
+		() => detail.oldContent == null ? null : { name: detail.previousPath ?? detail.path, contents: detail.oldContent },
+		[detail.oldContent, detail.path, detail.previousPath],
+	);
+	const newFile = useMemo(
+		() => detail.newContent == null ? null : { name: detail.path, contents: detail.newContent },
+		[detail.newContent, detail.path],
+	);
+	const file = useMemo(
+		() => ({ name: detail.path, contents: detail.currentContent ?? detail.newContent ?? detail.oldContent ?? "" }),
+		[detail.currentContent, detail.newContent, detail.oldContent, detail.path],
+	);
+	const diffLineAnnotations = useMemo(
+		() => [...buildDiffLineAnnotations(fileThreads, "old"), ...buildDiffLineAnnotations(fileThreads, "new")],
+		[fileThreads],
+	);
+	const fileAnnotations = useMemo(() => buildFileLineAnnotations(fileThreads), [fileThreads]);
+	const diffOptions = useMemo(() => ({
+		diffStyle: "split" as const,
+		enableLineSelection: true,
+		enableGutterUtility: true,
+		onLineSelected: handleDiffLineSelected,
+	}), [handleDiffLineSelected]);
+	const fileOptions = useMemo(() => ({
+		enableLineSelection: true,
+		enableGutterUtility: true,
+		onLineSelected: handleFileLineSelected,
+	}), [handleFileLineSelected]);
+
 	if (detail.loadError) return <pre>{detail.loadError.message}</pre>;
 	if (detail.isBinary) return <pre>Binary file cannot be rendered.</pre>;
-	const selectedLines = selectedAnchor?.path === detail.path ? anchorToSelectedLines(selectedAnchor) : null;
-	const fileThreads = threads.filter((thread) => thread.path === detail.path && thread.root.line);
-	if (detail.oldContent != null && detail.newContent != null && detail.oldContent !== detail.newContent) {
-		const deletionAnnotations = buildDiffLineAnnotations(fileThreads, "old");
-		const additionAnnotations = buildDiffLineAnnotations(fileThreads, "new");
+	if (detail.oldContent != null && detail.newContent != null && detail.oldContent !== detail.newContent && oldFile && newFile) {
 		return (
 			<MultiFileDiff
-				oldFile={{ name: detail.previousPath ?? detail.path, contents: detail.oldContent }}
-				newFile={{ name: detail.path, contents: detail.newContent }}
+				oldFile={oldFile}
+				newFile={newFile}
 				selectedLines={selectedLines}
-				lineAnnotations={[...deletionAnnotations, ...additionAnnotations]}
-				renderAnnotation={(annotation) => renderAnnotationButton(annotation, focusedThreadId, onFocusThread)}
-				renderGutterUtility={(getHoveredLine) => renderGutterButton(hoveredLineToAnchor(detail.path, getHoveredLine()), onSelectAnchor)}
-				options={{
-					diffStyle: "split",
-					enableLineSelection: true,
-					enableGutterUtility: true,
-					onLineSelected: (range) => onSelectAnchor?.(selectionRangeToAnchor(detail.path, range)),
-				}}
+				lineAnnotations={diffLineAnnotations}
+				renderAnnotation={renderAnnotation}
+				renderGutterUtility={renderDiffGutterUtility}
+				options={diffOptions}
 			/>
 		);
 	}
-	const fileAnnotations = buildFileLineAnnotations(fileThreads);
 	return (
 		<File
-			file={{ name: detail.path, contents: detail.currentContent ?? detail.newContent ?? detail.oldContent ?? "" }}
+			file={file}
 			selectedLines={selectedLines}
 			lineAnnotations={fileAnnotations}
-			renderAnnotation={(annotation) => renderAnnotationButton(annotation, focusedThreadId, onFocusThread)}
-			renderGutterUtility={(getHoveredLine) => renderGutterButton(hoveredLineToAnchor(detail.path, getHoveredLine(), "new"), onSelectAnchor)}
-			options={{
-				enableLineSelection: true,
-				enableGutterUtility: true,
-				onLineSelected: (range) => onSelectAnchor?.(selectionRangeToAnchor(detail.path, range, "new")),
-			}}
+			renderAnnotation={renderAnnotation}
+			renderGutterUtility={renderFileGutterUtility}
+			options={fileOptions}
 		/>
 	);
-}
+});

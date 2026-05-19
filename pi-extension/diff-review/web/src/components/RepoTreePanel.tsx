@@ -1,7 +1,8 @@
+import { memo } from "react";
 import type { DiffTreeEntry } from "../types.ts";
 import { PierreRepoTree } from "../adapters/pierre-trees.tsx";
 
-export function RepoTreePanel({
+export const RepoTreePanel = memo(function RepoTreePanel({
 	paths,
 	changedFiles,
 	selectedPath,
@@ -22,4 +23,4 @@ export function RepoTreePanel({
 			/>
 		</div>
 	);
-}
+});

@@ -1,8 +1,9 @@
+import { memo } from "react";
 import type { DiffFileDetail, LineAnchor, ReviewThread } from "../types.ts";
 import { PierreDiffView } from "../adapters/pierre-diffs.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 
-export function DiffViewer({
+export const DiffViewer = memo(function DiffViewer({
 	detail,
 	loading,
 	error,
@@ -36,4 +37,4 @@ export function DiffViewer({
 			/>
 		</div>
 	);
-}
+});

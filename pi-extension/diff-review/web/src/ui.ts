@@ -20,6 +20,15 @@ export function getSelectedDraftAnchor(
 	return draft.line ?? null;
 }
 
+export function reuseShallowEqualArray<T>(previous: readonly T[], next: readonly T[]) {
+	if (previous === next) return previous;
+	if (previous.length !== next.length) return next;
+	for (let index = 0; index < previous.length; index += 1) {
+		if (previous[index] !== next[index]) return next;
+	}
+	return previous;
+}
+
 export function formatAnchor(line?: LineAnchor) {
 	if (!line) return null;
 	if (line.startLine === line.endLine) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectEvents, createThread, createThreadReply, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
 import { DiffToolbar } from "./components/DiffToolbar.tsx";
 import { DiffViewer } from "./components/DiffViewer.tsx";
@@ -8,7 +8,7 @@ import { RepoTreePanel } from "./components/RepoTreePanel.tsx";
 import { ReviewLayout } from "./components/ReviewLayout.tsx";
 import { createReviewSessionState } from "./state/review-session.ts";
 import type { BootstrapPayload, DiffFileDetail } from "./types.ts";
-import { getSelectedDraftAnchor } from "./ui.ts";
+import { getSelectedDraftAnchor, reuseShallowEqualArray } from "./ui.ts";
 
 export function App() {
 	const [sessionState, setSessionState] = useState<ReturnType<typeof createReviewSessionState> | null>(null);
@@ -17,6 +17,8 @@ export function App() {
 	const [fileError, setFileError] = useState<string | null>(null);
 	const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 	const [, rerender] = useState(0);
+	const visiblePathsRef = useRef<BootstrapPayload["paths"]>([]);
+	const selectedThreadsRef = useRef<BootstrapPayload["threads"]>([]);
 
 	useEffect(() => {
 		let active = true;
@@ -73,9 +75,20 @@ export function App() {
 		};
 	}, [sessionState?.selectedPath]);
 
-	const visiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
-	const selectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
+	const nextVisiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
+	const visiblePaths = reuseShallowEqualArray(visiblePathsRef.current, nextVisiblePaths);
+	visiblePathsRef.current = visiblePaths;
+	const nextSelectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
+	const selectedThreads = reuseShallowEqualArray(selectedThreadsRef.current, nextSelectedThreads);
+	selectedThreadsRef.current = selectedThreads;
 	const selectedAnchor = getSelectedDraftAnchor(sessionState?.draft, sessionState?.selectedPath);
+	const handleSelectPath = useCallback((path: string) => sessionState?.selectPath(path), [sessionState]);
+	const handleSelectAnchor = useCallback((anchor: import("./types.ts").LineAnchor | null) => {
+		if (anchor) {
+			sessionState?.startLineDraft(anchor);
+		}
+	}, [sessionState]);
+	const handleFocusThread = useCallback((threadId: string) => sessionState?.focusThread(threadId), [sessionState]);
 
 	function handleStateError(error: unknown) {
 		sessionState?.applyConnectionError(error instanceof Error ? error.message : String(error));
@@ -112,7 +125,7 @@ export function App() {
 		<ReviewLayout
 			left={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>
 				<FilterBar showChangedOnly={sessionState.showChangedOnly} onToggle={() => sessionState.setShowChangedOnly(!sessionState.showChangedOnly)} warning={sessionState.getBannerMessage()} />
-				<RepoTreePanel paths={visiblePaths} changedFiles={sessionState.changedFiles} selectedPath={sessionState.selectedPath} onSelect={(path) => sessionState.selectPath(path)} />
+				<RepoTreePanel paths={visiblePaths} changedFiles={sessionState.changedFiles} selectedPath={sessionState.selectedPath} onSelect={handleSelectPath} />
 			</div>}
 			center={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>
 				<DiffToolbar
@@ -151,12 +164,8 @@ export function App() {
 					threads={selectedThreads}
 					focusedThreadId={sessionState.focusedThreadId}
 					selectedAnchor={selectedAnchor}
-					onSelectAnchor={(anchor) => {
-						if (anchor) {
-							sessionState.startLineDraft(anchor);
-						}
-					}}
-					onFocusThread={(threadId) => sessionState.focusThread(threadId)}
+					onSelectAnchor={handleSelectAnchor}
+					onFocusThread={handleFocusThread}
 				/>
 			</div>}
 			right={<CommentSidebar
