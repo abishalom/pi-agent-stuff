@@ -24,3 +24,22 @@ export function anchorToSelectedLines(anchor: LineAnchor | null | undefined): Se
 		endSide: side,
 	};
 }
+
+export function hoveredLineToAnchor(
+	path: string,
+	hoveredLine: { lineNumber: number; side?: "additions" | "deletions" } | undefined,
+	fallbackTargetSide: LineAnchor["targetSide"] = "new",
+): LineAnchor | null {
+	if (!hoveredLine) return null;
+	const targetSide = hoveredLine.side === "deletions"
+		? "old"
+		: hoveredLine.side === "additions"
+			? "new"
+			: fallbackTargetSide;
+	return {
+		path,
+		startLine: hoveredLine.lineNumber,
+		endLine: hoveredLine.lineNumber,
+		targetSide,
+	};
+}

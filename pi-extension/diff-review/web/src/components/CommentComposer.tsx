@@ -1,5 +1,5 @@
 import type { DraftComment } from "../types.ts";
-import { formatDraftLabel, getComposerIdleActions } from "../ui.ts";
+import { formatDraftLabel, getComposerIdleActions, getGutterCommentLabel } from "../ui.ts";
 
 export function CommentComposer({
 	draft,
@@ -27,7 +27,7 @@ export function CommentComposer({
 			</div>
 			{!draft ? (
 				<div style={{ color: "#94a3b8", fontSize: 12 }}>
-					Use <strong>File comment</strong> for file-level feedback, or click/drag in the diff to draft a line or range comment.
+					Use <strong>File comment</strong> for file-level feedback, click <strong>{getGutterCommentLabel()}</strong> in the gutter for a single-line comment, or drag in the diff to draft a range comment.
 				</div>
 			) : isThreadDraft ? (
 				<>

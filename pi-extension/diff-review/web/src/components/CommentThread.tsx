@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { DraftComment, ReviewThread } from "../types.ts";
 import { buildThreadTimeline, formatAnchor, formatDraftLabel } from "../ui.ts";
 
@@ -7,6 +8,7 @@ function truncate(text: string, maxLength = 72) {
 
 export function CommentThread({
 	thread,
+	isFocused,
 	collapsed,
 	replyDraft,
 	onToggleCollapsed,
@@ -16,6 +18,7 @@ export function CommentThread({
 	onCancelReply,
 }: {
 	thread: ReviewThread;
+	isFocused: boolean;
 	collapsed: boolean;
 	replyDraft: DraftComment | null;
 	onToggleCollapsed(): void;
@@ -27,8 +30,26 @@ export function CommentThread({
 	const timeline = buildThreadTimeline(thread);
 	const anchor = formatAnchor(thread.root.line);
 	const summary = truncate(thread.root.body.replace(/\s+/g, " "));
+	const containerRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		if (!isFocused) return;
+		containerRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	}, [isFocused]);
+
 	return (
-		<div style={{ border: "1px solid #1e293b", borderRadius: 10, padding: 12, display: "grid", gap: 10, background: "#111827" }}>
+		<div
+			ref={containerRef}
+			style={{
+				border: isFocused ? "1px solid #2563eb" : "1px solid #1e293b",
+				borderRadius: 10,
+				padding: 12,
+				display: "grid",
+				gap: 10,
+				background: isFocused ? "#172554" : "#111827",
+				boxShadow: isFocused ? "0 0 0 1px rgba(37,99,235,0.2)" : undefined,
+			}}
+		>
 			<div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "start", gap: 10 }}>
 				<button onClick={onToggleCollapsed} aria-label={collapsed ? "Expand thread" : "Collapse thread"} style={{ width: 24, height: 24 }}>
 					{collapsed ? "+" : "-"}
@@ -45,7 +66,7 @@ export function CommentThread({
 				<>
 					<div style={{ display: "grid", gap: 8 }}>
 						{timeline.map((entry) => (
-							<div key={entry.id} style={{ padding: 10, borderRadius: 8, background: entry.author === "Pi" ? "#172554" : "#0f172a" }}>
+							<div key={entry.id} style={{ padding: 10, borderRadius: 8, background: entry.author === "Pi" ? "#1d4ed8" : "#0f172a" }}>
 								<div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
 									<strong style={{ color: "#f8fafc" }}>{entry.author}</strong>
 									{entry.line ? <span style={{ color: "#94a3b8", fontSize: 12 }}>{thread.path}:{formatAnchor(entry.line)}</span> : null}

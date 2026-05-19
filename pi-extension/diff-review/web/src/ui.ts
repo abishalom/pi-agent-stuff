@@ -8,6 +8,10 @@ export function getComposerIdleActions() {
 	return ["File comment"];
 }
 
+export function getGutterCommentLabel() {
+	return "+";
+}
+
 export function formatAnchor(line?: LineAnchor) {
 	if (!line) return null;
 	if (line.startLine === line.endLine) {

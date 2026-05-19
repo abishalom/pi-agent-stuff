@@ -73,6 +73,7 @@ export function App() {
 	}, [sessionState?.selectedPath]);
 
 	const visiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
+	const selectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
 	const selectedAnchor = sessionState?.draft?.path === sessionState?.selectedPath ? sessionState.draft.line ?? null : null;
 
 	function handleStateError(error: unknown) {
@@ -146,16 +147,20 @@ export function App() {
 					detail={fileDetail}
 					loading={fileLoading}
 					error={fileError}
+					threads={selectedThreads}
+					focusedThreadId={sessionState.focusedThreadId}
 					selectedAnchor={selectedAnchor}
 					onSelectAnchor={(anchor) => {
 						if (anchor) {
 							sessionState.startLineDraft(anchor);
 						}
 					}}
+					onFocusThread={(threadId) => sessionState.focusThread(threadId)}
 				/>
 			</div>}
 			right={<CommentSidebar
-				threads={sessionState.getThreadsForSelectedPath()}
+				threads={selectedThreads}
+				focusedThreadId={sessionState.focusedThreadId}
 				draft={sessionState.draft}
 				pending={Boolean(sessionState.pendingSubmission)}
 				onStartFileComment={() => {

@@ -5,6 +5,7 @@ import { EmptyState } from "./EmptyState.tsx";
 
 export function CommentSidebar({
 	threads,
+	focusedThreadId,
 	draft,
 	pending,
 	onStartFileComment,
@@ -16,6 +17,7 @@ export function CommentSidebar({
 	isThreadCollapsed,
 }: {
 	threads: ReviewThread[];
+	focusedThreadId: string | null;
 	draft: DraftComment | null;
 	pending: boolean;
 	onStartFileComment(): void;
@@ -34,7 +36,7 @@ export function CommentSidebar({
 			</div>
 			<div style={{ padding: 12, overflow: "auto", display: "grid", gap: 12 }}>
 				{threads.length === 0 ? (
-					<EmptyState title="No threads for this file" detail="Add a file comment or click/drag in the diff to start a line comment." />
+					<EmptyState title="No threads for this file" detail="Add a file comment, click the + gutter action for a single-line comment, or drag in the diff to start a range comment." />
 				) : (
 					threads.map((thread) => {
 						const replyDraft = draft?.kind === "reply" && draft.threadId === thread.id ? draft : null;
@@ -42,6 +44,7 @@ export function CommentSidebar({
 							<CommentThread
 								key={thread.id}
 								thread={thread}
+								isFocused={focusedThreadId === thread.id}
 								collapsed={isThreadCollapsed(thread.id)}
 								replyDraft={replyDraft}
 								onToggleCollapsed={() => onToggleThreadCollapsed(thread.id)}

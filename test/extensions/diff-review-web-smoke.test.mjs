@@ -7,7 +7,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
-import { createRepoTreeModelKey } from "../../pi-extension/diff-review/web/src/state/repo-tree.ts";
 import { getSubmitButtonLabel, getComposerIdleActions } from "../../pi-extension/diff-review/web/src/ui.ts";
 import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
 
@@ -88,6 +87,10 @@ async function runVerifyWithDirtyStaticFixture() {
 	} finally {
 		await rm(fixtureRoot, { recursive: true, force: true });
 	}
+}
+
+async function importWebModule(relativePath) {
+	return import(new URL(relativePath, import.meta.url).href);
 }
 
 test("frontend review-session state supports file drafts, selected line drafts, inline reply drafts, and reply rendering", () => {
@@ -171,17 +174,94 @@ test("frontend review-session state can refresh changed-tree data after diff-mod
 	assert.equal(state.selectedPath, "src/b.ts");
 });
 
-test("repo tree model key changes when the visible path set changes", () => {
-	const fullRepoKey = createRepoTreeModelKey(
-		["README.md", "src/a.ts"],
-		[{ path: "src/a.ts", status: "modified" }],
-	);
-	const changedOnlyKey = createRepoTreeModelKey(
-		["src/a.ts"],
-		[{ path: "src/a.ts", status: "modified" }],
-	);
+test("frontend review-session state can focus a thread and sync the selected file", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	state.focusThread("thread-1");
+	assert.equal(state.focusedThreadId, "thread-1");
+	assert.equal(state.selectedPath, "src/a.ts");
+});
 
-	assert.notEqual(fullRepoKey, changedOnlyKey);
+test("syncPierreTreeModel mutates the Pierre tree model instead of relying on remount keys", async () => {
+	const { syncPierreTreeModel } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+	const calls = [];
+	const model = {
+		resetPaths(paths, options) {
+			calls.push(["resetPaths", [...paths], options]);
+		},
+		setGitStatus(entries) {
+			calls.push(["setGitStatus", entries]);
+		},
+		focusPath(pathname) {
+			calls.push(["focusPath", pathname]);
+		},
+		getItem(pathname) {
+			calls.push(["getItem", pathname]);
+			return { select() { calls.push(["select", pathname]); } };
+		},
+	};
+
+	syncPierreTreeModel(model, {
+		paths: ["README.md", "src/a.ts"],
+		changedFiles: [{ path: "src/a.ts", status: "modified" }],
+		selectedPath: "src/a.ts",
+		preparedInput: { fake: true },
+	});
+
+	assert.deepEqual(calls.map(([name]) => name), [
+		"resetPaths",
+		"setGitStatus",
+		"focusPath",
+		"getItem",
+		"select",
+	]);
+});
+
+test("toPierreGitStatus maps binary entries to modified for Pierre git-status rendering", async () => {
+	const { toPierreGitStatus } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+	assert.deepEqual(toPierreGitStatus([
+		{ path: "bin.dat", status: "binary" },
+		{ path: "src/a.ts", status: "modified" },
+	]), [
+		{ path: "bin.dat", status: "modified" },
+		{ path: "src/a.ts", status: "modified" },
+	]);
+});
+
+test("buildDiffLineAnnotations groups anchored threads by side and line", async () => {
+	const { buildDiffLineAnnotations } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/diff-review-annotations.ts");
+	const annotations = buildDiffLineAnnotations([
+		{
+			id: "thread-1",
+			path: "src/a.ts",
+			root: {
+				id: "comment-1",
+				path: "src/a.ts",
+				body: "one",
+				status: "open",
+				line: { startLine: 7, endLine: 7, targetSide: "new" },
+			},
+			userReplies: [],
+			replies: [],
+		},
+		{
+			id: "thread-2",
+			path: "src/a.ts",
+			root: {
+				id: "comment-2",
+				path: "src/a.ts",
+				body: "two",
+				status: "open",
+				line: { startLine: 7, endLine: 8, targetSide: "new" },
+			},
+			userReplies: [],
+			replies: [],
+		},
+	], "new");
+
+	assert.deepEqual(annotations, [
+		{ side: "additions", lineNumber: 7, metadata: { threadIds: ["thread-1", "thread-2"], count: 2 } },
+		{ side: "additions", lineNumber: 8, metadata: { threadIds: ["thread-2"], count: 1 } },
+	]);
 });
 
 
@@ -206,6 +286,19 @@ test("Pierre diff selection ranges are converted into anchors without defaulting
 		{ path: "src/a.ts", startLine: 3, endLine: 3, targetSide: "old" },
 	);
 	assert.equal(selectionRangeToAnchor("src/a.ts", null), null);
+});
+
+test("hoveredLineToAnchor maps additions and deletions to the correct target side", async () => {
+	const { hoveredLineToAnchor } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts");
+	assert.deepEqual(
+		hoveredLineToAnchor("src/a.ts", { lineNumber: 12, side: "additions" }),
+		{ path: "src/a.ts", startLine: 12, endLine: 12, targetSide: "new" },
+	);
+	assert.deepEqual(
+		hoveredLineToAnchor("src/a.ts", { lineNumber: 5, side: "deletions" }),
+		{ path: "src/a.ts", startLine: 5, endLine: 5, targetSide: "old" },
+	);
+	assert.equal(hoveredLineToAnchor("src/a.ts", undefined), null);
 });
 
 test("verify:diff-review-web fails when committed static assets drift", async () => {

@@ -52,6 +52,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		changedFiles: [...payload.changedFiles],
 		threads: cloneThreads(payload.threads),
 		selectedPath: payload.changedPaths[0] ?? payload.paths[0] ?? payload.files[0]?.path ?? null,
+		focusedThreadId: null as string | null,
 		showChangedOnly: false,
 		draft: null as DraftComment | null,
 		connectionState: "connecting" as ConnectionState,
@@ -65,6 +66,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		},
 		selectPath(path: string) {
 			state.selectedPath = path;
+			state.focusedThreadId = null;
 			state.emit();
 		},
 		setShowChangedOnly(value: boolean) {
@@ -76,11 +78,13 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		},
 		startFileDraft(path: string) {
 			state.selectedPath = path;
+			state.focusedThreadId = null;
 			state.draft = { id: `draft-${nextDraftId++}`, kind: "thread", path, text: "" };
 			state.emit();
 		},
 		startLineDraft(line: LineAnchor) {
 			state.selectedPath = line.path;
+			state.focusedThreadId = null;
 			state.draft = { id: `draft-${nextDraftId++}`, kind: "thread", path: line.path, line, text: "" };
 			state.emit();
 		},
@@ -88,6 +92,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			const thread = findThread(state.threads, threadId);
 			if (!thread) return;
 			state.selectedPath = thread.path;
+			state.focusedThreadId = threadId;
 			state.draft = {
 				id: `draft-${nextDraftId++}`,
 				kind: "reply",
@@ -105,6 +110,18 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		},
 		clearDraft() {
 			state.draft = null;
+			state.emit();
+		},
+		focusThread(threadId: string) {
+			const thread = findThread(state.threads, threadId);
+			if (!thread) return;
+			state.focusedThreadId = threadId;
+			state.selectedPath = thread.path;
+			state.emit();
+		},
+		clearFocusedThread() {
+			if (!state.focusedThreadId) return;
+			state.focusedThreadId = null;
 			state.emit();
 		},
 		replaceThread(thread: ReviewThread, options?: { emit?: boolean }) {
@@ -150,6 +167,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.pendingSubmission = next.pendingSubmission;
 			state.submissionHistory = [...next.submissionHistory];
 			state.files = [...next.files];
+			state.focusedThreadId = null;
 			state.applyTree(next, { emit: false, fallbackPath: next.files[0]?.path ?? null });
 			state.threads = cloneThreads(next.threads);
 			state.connectionState = "open";
@@ -165,6 +183,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 				|| (state.showChangedOnly && !state.changedPaths.includes(state.selectedPath));
 			if (mustReselect) {
 				state.selectedPath = state.changedPaths[0] ?? state.paths[0] ?? options?.fallbackPath ?? null;
+				state.focusedThreadId = null;
 			}
 			if (options?.emit !== false) {
 				state.emit();
