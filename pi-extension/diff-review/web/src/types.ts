@@ -2,6 +2,7 @@ export type DiffMode = "working-tree-vs-head" | "merge-base-vs-head";
 export type DiffFileStatus = "modified" | "added" | "deleted" | "renamed" | "binary";
 export type TargetSide = "old" | "new";
 export type ConnectionState = "connecting" | "open" | "closed" | "error";
+export type ThreadSortMode = "creation-desc" | "last-activity-desc" | "line-number-asc";
 
 export type LineAnchor = {
 	path: string;

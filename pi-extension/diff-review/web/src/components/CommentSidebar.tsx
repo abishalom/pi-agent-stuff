@@ -1,5 +1,5 @@
-import type { DraftComment, ReviewThread } from "../types.ts";
-import { getThreadListStyle } from "../ui.ts";
+import type { DraftComment, ReviewThread, ThreadSortMode } from "../types.ts";
+import { getButtonStyle, getThreadListStyle, getThreadSortButtonLabel } from "../ui.ts";
 import { CommentComposer } from "./CommentComposer.tsx";
 import { CommentThread } from "./CommentThread.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -9,6 +9,8 @@ export function CommentSidebar({
 	focusedThreadId,
 	draft,
 	pending,
+	threadSortMode,
+	onCycleThreadSort,
 	onFocusThread,
 	onStartFileComment,
 	onDraftChange,
@@ -22,6 +24,8 @@ export function CommentSidebar({
 	focusedThreadId: string | null;
 	draft: DraftComment | null;
 	pending: boolean;
+	threadSortMode: ThreadSortMode;
+	onCycleThreadSort(): void;
 	onFocusThread(threadId: string): void;
 	onStartFileComment(): void;
 	onDraftChange(text: string): void;
@@ -32,10 +36,15 @@ export function CommentSidebar({
 	isThreadCollapsed(threadId: string): boolean;
 }) {
 	return (
-		<div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", height: "100%", background: "#020617" }}>
+		<div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", height: "100%", minHeight: 0, background: "#020617" }}>
 			<CommentComposer draft={draft} onStartFileComment={onStartFileComment} onChange={onDraftChange} onSave={onSaveDraft} onCancel={onCancelDraft} />
-			<div style={{ padding: "10px 12px", borderBottom: "1px solid #1e293b", fontSize: 12, color: "#94a3b8" }}>
-				{pending ? "Waiting for Pi to complete this round" : "Ready for more feedback"}
+			<div style={{ padding: "10px 12px", borderBottom: "1px solid #1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+				<div style={{ fontSize: 12, color: "#94a3b8" }}>
+					{pending ? "Waiting for Pi to complete this round" : "Ready for more feedback"}
+				</div>
+				<button onClick={onCycleThreadSort} style={getButtonStyle("secondary", { compact: true })} aria-label="Cycle thread sort order">
+					{getThreadSortButtonLabel(threadSortMode)}
+				</button>
 			</div>
 			<div style={getThreadListStyle()}>
 				{threads.length === 0 ? (

@@ -53,7 +53,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		threads: cloneThreads(payload.threads),
 		selectedPath: payload.changedPaths[0] ?? payload.paths[0] ?? payload.files[0]?.path ?? null,
 		focusedThreadId: null as string | null,
-		showChangedOnly: false,
+		showChangedOnly: true,
 		draft: null as DraftComment | null,
 		connectionState: "connecting" as ConnectionState,
 		errorMessage: null as string | null,

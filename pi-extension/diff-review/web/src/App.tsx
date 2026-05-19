@@ -3,12 +3,13 @@ import { connectEvents, createThread, createThreadReply, fetchFile, fetchSession
 import { DiffToolbar } from "./components/DiffToolbar.tsx";
 import { DiffViewer } from "./components/DiffViewer.tsx";
 import { FilterBar } from "./components/FilterBar.tsx";
+import { FloatingDraftComposer } from "./components/FloatingDraftComposer.tsx";
 import { CommentSidebar } from "./components/CommentSidebar.tsx";
 import { RepoTreePanel } from "./components/RepoTreePanel.tsx";
 import { ReviewLayout } from "./components/ReviewLayout.tsx";
 import { createReviewSessionState } from "./state/review-session.ts";
-import type { BootstrapPayload, DiffFileDetail } from "./types.ts";
-import { getActiveDiffAnchor, reuseShallowEqualArray } from "./ui.ts";
+import type { BootstrapPayload, DiffFileDetail, ThreadSortMode } from "./types.ts";
+import { getActiveDiffAnchor, getDraftComposerPlacement, getNextThreadSortMode, getPaneStackStyle, sortThreads, reuseShallowEqualArray } from "./ui.ts";
 
 export function App() {
 	const [sessionState, setSessionState] = useState<ReturnType<typeof createReviewSessionState> | null>(null);
@@ -16,6 +17,7 @@ export function App() {
 	const [fileLoading, setFileLoading] = useState(false);
 	const [fileError, setFileError] = useState<string | null>(null);
 	const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+	const [threadSortMode, setThreadSortMode] = useState<ThreadSortMode>("line-number-asc");
 	const [, rerender] = useState(0);
 	const visiblePathsRef = useRef<BootstrapPayload["paths"]>([]);
 	const selectedThreadsRef = useRef<BootstrapPayload["threads"]>([]);
@@ -78,7 +80,10 @@ export function App() {
 	const nextVisiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
 	const visiblePaths = reuseShallowEqualArray(visiblePathsRef.current, nextVisiblePaths);
 	visiblePathsRef.current = visiblePaths;
-	const nextSelectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
+	const nextSelectedThreads = useMemo(
+		() => sortThreads(sessionState?.getThreadsForSelectedPath() ?? [], threadSortMode),
+		[sessionState, sessionState?.selectedPath, sessionState?.threads, threadSortMode],
+	);
 	const selectedThreads = reuseShallowEqualArray(selectedThreadsRef.current, nextSelectedThreads);
 	selectedThreadsRef.current = selectedThreads;
 	const selectedAnchor = getActiveDiffAnchor({
@@ -126,13 +131,19 @@ export function App() {
 		}
 	}
 
+	const floatingDraft = sessionState.draft?.kind === "thread"
+		&& getDraftComposerPlacement(sessionState.draft) === "floating"
+		&& sessionState.draft.path === sessionState.selectedPath
+		? sessionState.draft
+		: null;
+
 	return (
 		<ReviewLayout
-			left={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>
+			left={<div style={getPaneStackStyle()}>
 				<FilterBar showChangedOnly={sessionState.showChangedOnly} onToggle={() => sessionState.setShowChangedOnly(!sessionState.showChangedOnly)} warning={sessionState.getBannerMessage()} />
 				<RepoTreePanel paths={visiblePaths} changedFiles={sessionState.changedFiles} selectedPath={sessionState.selectedPath} onSelect={handleSelectPath} />
 			</div>}
-			center={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>
+			center={<div style={{ ...getPaneStackStyle(), position: "relative" }}>
 				<DiffToolbar
 					diffMode={sessionState.diffMode}
 					pending={Boolean(sessionState.pendingSubmission)}
@@ -172,12 +183,20 @@ export function App() {
 					onSelectAnchor={handleSelectAnchor}
 					onFocusThread={handleFocusThread}
 				/>
+				<FloatingDraftComposer
+					draft={floatingDraft}
+					onChange={(text) => sessionState.updateDraftText(text)}
+					onSave={saveDraft}
+					onCancel={() => sessionState.clearDraft()}
+				/>
 			</div>}
 			right={<CommentSidebar
 				threads={selectedThreads}
 				focusedThreadId={sessionState.focusedThreadId}
 				draft={sessionState.draft}
 				pending={Boolean(sessionState.pendingSubmission)}
+				threadSortMode={threadSortMode}
+				onCycleThreadSort={() => setThreadSortMode((current) => getNextThreadSortMode(current))}
 				onFocusThread={handleFocusThread}
 				onStartFileComment={() => {
 					const path = sessionState.selectedPath ?? sessionState.paths[0] ?? "";

@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { DiffFileDetail, LineAnchor, ReviewThread } from "../types.ts";
 import { PierreDiffView } from "../adapters/pierre-diffs.tsx";
+import { getPaneScrollAreaStyle } from "../ui.ts";
 import { EmptyState } from "./EmptyState.tsx";
 
 export const DiffViewer = memo(function DiffViewer({
@@ -26,7 +27,7 @@ export const DiffViewer = memo(function DiffViewer({
 	if (error) return <EmptyState title="Unable to load file" detail={error} />;
 	if (!detail) return <EmptyState title="Select a file" />;
 	return (
-		<div style={{ overflow: "auto", height: "100%" }}>
+		<div style={getPaneScrollAreaStyle()}>
 			<PierreDiffView
 				detail={detail}
 				threads={threads}

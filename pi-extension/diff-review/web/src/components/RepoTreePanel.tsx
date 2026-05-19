@@ -14,7 +14,7 @@ export const RepoTreePanel = memo(function RepoTreePanel({
 	onSelect(path: string): void;
 }) {
 	return (
-		<div style={{ height: "100%", overflow: "hidden" }}>
+		<div style={{ height: "100%", minHeight: 0, overflow: "hidden" }}>
 			<PierreRepoTree
 				paths={paths}
 				changedFiles={changedFiles}

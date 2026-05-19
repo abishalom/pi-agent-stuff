@@ -1,5 +1,5 @@
 import type { DraftComment } from "../types.ts";
-import { formatDraftLabel, getButtonStyle, getComposerIdleActions, getGutterCommentLabel, getTextFieldStyle } from "../ui.ts";
+import { formatDraftLabel, getButtonStyle, getComposerIdleActions, getDraftComposerPlacement, getGutterCommentLabel, getTextFieldStyle } from "../ui.ts";
 
 export function CommentComposer({
 	draft,
@@ -15,6 +15,7 @@ export function CommentComposer({
 	onCancel(): void;
 }) {
 	const isThreadDraft = draft?.kind === "thread";
+	const placement = getDraftComposerPlacement(draft);
 	return (
 		<div style={{ padding: 12, borderBottom: "1px solid #1e293b", display: "grid", gap: 8, background: "#0f172a" }}>
 			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -29,12 +30,16 @@ export function CommentComposer({
 				<div style={{ color: "#94a3b8", fontSize: 12 }}>
 					Use <strong>File comment</strong> for file-level feedback, click <strong>{getGutterCommentLabel()}</strong> in the gutter for a single-line comment, or drag in the diff to draft a range comment.
 				</div>
-			) : isThreadDraft ? (
+			) : isThreadDraft && placement === "sidebar" ? (
 				<>
 					<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(draft)}</div>
 					<textarea rows={4} value={draft.text} onChange={(event) => onChange(event.target.value)} style={getTextFieldStyle({ minHeight: 104 })} />
 					<button onClick={onSave} disabled={!draft.text.trim()} style={getButtonStyle("primary", { disabled: !draft.text.trim() })}>Add thread</button>
 				</>
+			) : isThreadDraft ? (
+				<div style={{ color: "#94a3b8", fontSize: 12 }}>
+					Drafting <strong>{formatDraftLabel(draft)}</strong> in the floating comment window over the diff.
+				</div>
 			) : (
 				<div style={{ color: "#94a3b8", fontSize: 12 }}>
 					Replying inline below. Finish or cancel that reply to start another draft here.

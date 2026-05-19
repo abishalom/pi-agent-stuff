@@ -11,11 +11,18 @@ import {
 	getActiveDiffAnchor,
 	getButtonStyle,
 	getComposerIdleActions,
+	getDraftComposerPlacement,
+	getNextThreadSortMode,
+	getPaneScrollAreaStyle,
+	getPaneStackStyle,
+	getReviewColumnStyle,
 	getSelectStyle,
 	getSubmitButtonLabel,
 	getTextFieldStyle,
 	getThreadCardLayout,
 	getThreadListStyle,
+	getThreadSortButtonLabel,
+	sortThreads,
 	reuseShallowEqualArray,
 } from "../../pi-extension/diff-review/web/src/ui.ts";
 import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
@@ -191,6 +198,12 @@ test("frontend review-session state can focus a thread and sync the selected fil
 	assert.equal(state.selectedPath, "src/a.ts");
 });
 
+test("frontend review-session state defaults to showing changed files in the tree", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	assert.equal(state.showChangedOnly, true);
+	assert.deepEqual(state.getVisiblePaths(), ["src/a.ts"]);
+});
+
 test("reuseShallowEqualArray preserves selected thread identity across unrelated draft edits", () => {
 	const state = createReviewSessionState(makeBootstrapPayload());
 	state.selectPath("src/a.ts");
@@ -239,6 +252,61 @@ test("thread list layout packs cards at the top instead of stretching them throu
 	assert.equal(style.overflow, "auto");
 	assert.equal(style.padding, 12);
 	assert.equal(style.gap, 12);
+});
+
+test("review layout styles preserve independent scrolling for tree, diff, and threads", () => {
+	const column = getReviewColumnStyle();
+	const stack = getPaneStackStyle();
+	const scroller = getPaneScrollAreaStyle();
+	assert.equal(column.minHeight, 0);
+	assert.equal(column.overflow, "hidden");
+	assert.equal(stack.minHeight, 0);
+	assert.equal(stack.overflow, "hidden");
+	assert.equal(scroller.minHeight, 0);
+	assert.equal(scroller.overflow, "auto");
+	assert.equal(scroller.height, "100%");
+});
+
+test("thread sorting cycles through creation time, last activity, and line number", () => {
+	const threads = [
+		{
+			id: "thread-1",
+			path: "src/a.ts",
+			root: { id: "comment-1", path: "src/a.ts", body: "one", status: "open", line: { startLine: 20, endLine: 20, targetSide: "new" }, createdAt: 10 },
+			userReplies: [{ id: "comment-1a", path: "src/a.ts", body: "follow up", status: "open", line: { startLine: 20, endLine: 20, targetSide: "new" }, createdAt: 40 }],
+			replies: [],
+		},
+		{
+			id: "thread-2",
+			path: "src/a.ts",
+			root: { id: "comment-2", path: "src/a.ts", body: "two", status: "open", line: { startLine: 5, endLine: 5, targetSide: "new" }, createdAt: 20 },
+			userReplies: [],
+			replies: [{ id: "reply-2", reviewSessionId: "review-session-1", submissionRoundId: "round-1", threadId: "thread-2", path: "src/a.ts", reply: "pi", recordedAt: 25 }],
+		},
+		{
+			id: "thread-3",
+			path: "src/a.ts",
+			root: { id: "comment-3", path: "src/a.ts", body: "three", status: "open", createdAt: 30 },
+			userReplies: [],
+			replies: [],
+		},
+	];
+	assert.deepEqual(sortThreads(threads, "creation-desc").map((thread) => thread.id), ["thread-3", "thread-2", "thread-1"]);
+	assert.deepEqual(sortThreads(threads, "last-activity-desc").map((thread) => thread.id), ["thread-1", "thread-3", "thread-2"]);
+	assert.deepEqual(sortThreads(threads, "line-number-asc").map((thread) => thread.id), ["thread-2", "thread-1", "thread-3"]);
+	assert.equal(getThreadSortButtonLabel("creation-desc"), "Sort: newest");
+	assert.equal(getThreadSortButtonLabel("last-activity-desc"), "Sort: active");
+	assert.equal(getThreadSortButtonLabel("line-number-asc"), "Sort: line");
+	assert.equal(getNextThreadSortMode("creation-desc"), "last-activity-desc");
+	assert.equal(getNextThreadSortMode("last-activity-desc"), "line-number-asc");
+	assert.equal(getNextThreadSortMode("line-number-asc"), "creation-desc");
+});
+
+test("line and range comment drafts use a floating popup while file comments stay in the sidebar", () => {
+	assert.equal(getDraftComposerPlacement(null), "sidebar");
+	assert.equal(getDraftComposerPlacement({ id: "draft-1", kind: "thread", path: "src/a.ts", text: "file" }), "sidebar");
+	assert.equal(getDraftComposerPlacement({ id: "draft-2", kind: "thread", path: "src/a.ts", line: { path: "src/a.ts", startLine: 7, endLine: 8, targetSide: "new" }, text: "line" }), "floating");
+	assert.equal(getDraftComposerPlacement({ id: "draft-3", kind: "reply", threadId: "thread-1", path: "src/a.ts", line: { path: "src/a.ts", startLine: 7, endLine: 7, targetSide: "new" }, text: "reply" }), "thread");
 });
 
 test("shared control styles keep buttons, selects, and text fields on-theme", () => {

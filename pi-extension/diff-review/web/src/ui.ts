@@ -1,4 +1,4 @@
-import type { DraftComment, LineAnchor, ReviewThread } from "./types.ts";
+import type { DraftComment, LineAnchor, ReviewThread, ThreadSortMode } from "./types.ts";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 
@@ -86,6 +86,85 @@ export function getThreadListStyle() {
 		flexDirection: "column",
 		gap: 12,
 	};
+}
+
+export function getReviewColumnStyle() {
+	return {
+		minWidth: 0,
+		minHeight: 0,
+		overflow: "hidden",
+	};
+}
+
+export function getPaneStackStyle() {
+	return {
+		display: "grid",
+		gridTemplateRows: "auto 1fr",
+		height: "100%",
+		minHeight: 0,
+		overflow: "hidden",
+	};
+}
+
+export function getPaneScrollAreaStyle() {
+	return {
+		height: "100%",
+		minHeight: 0,
+		minWidth: 0,
+		overflow: "auto",
+	};
+}
+
+export function getDraftComposerPlacement(draft: DraftComment | null | undefined) {
+	if (!draft) return "sidebar";
+	if (draft.kind === "reply") return "thread";
+	return draft.line ? "floating" : "sidebar";
+}
+
+export function getNextThreadSortMode(mode: ThreadSortMode): ThreadSortMode {
+	if (mode === "creation-desc") return "last-activity-desc";
+	if (mode === "last-activity-desc") return "line-number-asc";
+	return "creation-desc";
+}
+
+export function getThreadSortButtonLabel(mode: ThreadSortMode) {
+	if (mode === "creation-desc") return "Sort: newest";
+	if (mode === "last-activity-desc") return "Sort: active";
+	return "Sort: line";
+}
+
+function getThreadCreatedAt(thread: ReviewThread) {
+	return thread.root.createdAt ?? 0;
+}
+
+function getThreadLastActivityAt(thread: ReviewThread) {
+	return Math.max(
+		getThreadCreatedAt(thread),
+		...(thread.userReplies ?? []).map((reply) => reply.createdAt ?? 0),
+		...thread.replies.map((reply) => reply.recordedAt ?? 0),
+	);
+}
+
+function getThreadLineSortValue(thread: ReviewThread) {
+	return thread.root.line?.startLine ?? Number.MAX_SAFE_INTEGER;
+}
+
+export function sortThreads(threads: readonly ReviewThread[], mode: ThreadSortMode) {
+	const sorted = [...threads];
+	sorted.sort((left, right) => {
+		if (mode === "creation-desc") {
+			return getThreadCreatedAt(right) - getThreadCreatedAt(left) || left.id.localeCompare(right.id);
+		}
+		if (mode === "last-activity-desc") {
+			return getThreadLastActivityAt(right) - getThreadLastActivityAt(left)
+				|| getThreadCreatedAt(right) - getThreadCreatedAt(left)
+				|| left.id.localeCompare(right.id);
+		}
+		return getThreadLineSortValue(left) - getThreadLineSortValue(right)
+			|| getThreadCreatedAt(right) - getThreadCreatedAt(left)
+			|| left.id.localeCompare(right.id);
+	});
+	return sorted;
 }
 
 export function getButtonStyle(variant: ButtonVariant, options?: { disabled?: boolean; fullWidth?: boolean; compact?: boolean }) {
