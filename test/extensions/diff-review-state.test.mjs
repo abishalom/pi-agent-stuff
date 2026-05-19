@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
 	appendThread,
+	appendThreadReply,
 	completeSubmissionRound,
 	createReviewSessionStore,
 	submitReview,
@@ -111,7 +112,9 @@ test("submitReview injects the synthesized prompt contract", async () => {
 	assert.match(injectedPrompt, /reviewSessionId:\s+"review-session-1"/);
 	assert.match(injectedPrompt, /submissionRoundId:\s+"round-1"/);
 	assert.match(injectedPrompt, /diff_review_reply/);
+	assert.match(injectedPrompt, /diff_review_complete/);
 	assert.match(injectedPrompt, /must call the diff_review_reply tool/i);
+	assert.match(injectedPrompt, /must call the diff_review_complete tool even if you send zero replies/i);
 	assert.match(injectedPrompt, /do not reply only with freeform chat text/i);
 	assert.equal(injectedRound?.id, "round-1");
 });
@@ -126,6 +129,36 @@ test("completed submission rounds clear pending state and allow later submits", 
 
 	const nextRound = await submitReview(session, successfulInject);
 	assert.notEqual(nextRound.id, round.id);
+});
+
+
+test("pending rounds snapshot only currently open items and leave later thread replies for the next round", async () => {
+	const session = makeSessionWithOpenThread();
+	const round = await submitReview(session, async () => {});
+
+	assert.deepEqual(round.threadIds, ["thread-1"]);
+	assert.deepEqual(round.itemIds, ["comment-1"]);
+
+	const reply = appendThreadReply(session, {
+		threadId: "thread-1",
+		body: "Following up on the same thread",
+	});
+
+	assert.equal(reply.path, "src/a.ts");
+	assert.deepEqual(reply.line, { startLine: 4, endLine: 6, targetSide: "new" });
+	assert.equal(reply.status, "open");
+	assert.deepEqual(session.pendingSubmission?.itemIds, ["comment-1"]);
+
+	completeSubmissionRound(session, round.id);
+	const nextRound = await submitReview(session, async () => {});
+	assert.deepEqual(nextRound.threadIds, ["thread-1"]);
+	assert.deepEqual(nextRound.itemIds, [reply.id]);
+});
+
+
+test("completing a stale or missing round fails loudly instead of silently unlocking", () => {
+	const session = makeSessionWithOpenThread();
+	assert.throws(() => completeSubmissionRound(session, "round-999"), /submission round/i);
 });
 
 test("restored sessions derive the next submission round after the max historical or pending round id", async () => {

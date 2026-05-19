@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerDiffReviewReplyTool } from "./reply-tool.ts";
+import { registerDiffReviewCompleteTool, registerDiffReviewReplyTool } from "./reply-tool.ts";
 import { createReviewSessionStore } from "./state.ts";
 import { startReviewServer } from "./server.ts";
 import { shutdownSessionsForPiSessionKey } from "./cleanup.ts";
@@ -75,6 +75,7 @@ export function createDiffReviewExtension(deps?: {
 		});
 
 		registerDiffReviewReplyTool(pi, reviewSessionStore);
+		registerDiffReviewCompleteTool(pi, reviewSessionStore);
 	};
 }
 

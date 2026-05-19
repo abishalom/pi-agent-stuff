@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
 import { createRepoTreeModelKey } from "../../pi-extension/diff-review/web/src/state/repo-tree.ts";
+import { getSubmitButtonLabel, getComposerIdleActions } from "../../pi-extension/diff-review/web/src/ui.ts";
+import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "../..");
@@ -37,7 +39,9 @@ function makeBootstrapPayload() {
 					body: "Please review this change",
 					status: "open",
 					line: { startLine: 4, endLine: 4, targetSide: "new" },
+					createdAt: 1,
 				},
+				userReplies: [],
 				replies: [],
 			},
 		],
@@ -86,17 +90,55 @@ async function runVerifyWithDirtyStaticFixture() {
 	}
 }
 
-test("frontend review-session state supports bootstrap, file select, draft comment, merge-base warning, and reply rendering", () => {
+test("frontend review-session state supports file drafts, selected line drafts, inline reply drafts, and reply rendering", () => {
 	const state = createReviewSessionState(makeBootstrapPayload());
 	state.selectPath("src/a.ts");
-	state.startDraft(makeLineAnchor("src/a.ts", 4));
+	state.startFileDraft("src/a.ts");
+	state.updateDraftText("General file-level feedback");
+	assert.equal(state.draft?.kind, "thread");
+	assert.equal(state.draft?.path, "src/a.ts");
+	assert.equal(state.draft?.line, undefined);
+	assert.equal(state.draft?.text, "General file-level feedback");
+
+	state.startLineDraft(makeLineAnchor("src/a.ts", 4));
 	state.updateDraftText("Please revisit this line");
+	assert.equal(state.draft?.kind, "thread");
+	assert.equal(state.draft?.line?.startLine, 4);
+	assert.equal(state.draft?.line?.endLine, 4);
+
+	state.startReplyDraft("thread-1");
+	state.updateDraftText("Following up in the same thread");
+	assert.equal(state.draft?.kind, "reply");
+	assert.equal(state.draft?.threadId, "thread-1");
+	assert.equal(state.draft?.path, "src/a.ts");
+	assert.deepEqual(state.draft?.line, { startLine: 4, endLine: 4, targetSide: "new" });
+
+	state.applyUserReply({
+		threadId: "thread-1",
+		reply: {
+			id: "comment-2",
+			path: "src/a.ts",
+			body: "Following up in the same thread",
+			status: "open",
+			line: { startLine: 4, endLine: 4, targetSide: "new" },
+			createdAt: 2,
+		},
+	});
 	state.applyReply(makeReplyEvent("thread-1", "Looks good"));
 	assert.equal(state.selectedPath, "src/a.ts");
-	assert.equal(state.draft?.anchor.startLine, 4);
-	assert.equal(state.draft?.text, "Please revisit this line");
 	assert.match(state.mergeBaseWarning ?? "", /merge-base/i);
+	assert.equal(state.threads[0].userReplies.at(-1)?.body, "Following up in the same thread");
 	assert.equal(state.threads[0].replies.at(-1)?.reply, "Looks good");
+});
+
+
+test("frontend review-session state tracks collapsed thread UI state by thread id", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	assert.equal(state.isThreadCollapsed("thread-1"), false);
+	state.toggleThreadCollapsed("thread-1");
+	assert.equal(state.isThreadCollapsed("thread-1"), true);
+	state.toggleThreadCollapsed("thread-1");
+	assert.equal(state.isThreadCollapsed("thread-1"), false);
 });
 
 test("frontend review-session state preserves session-closed message across later reconnect errors", () => {
@@ -140,6 +182,30 @@ test("repo tree model key changes when the visible path set changes", () => {
 	);
 
 	assert.notEqual(fullRepoKey, changedOnlyKey);
+});
+
+
+test("diff toolbar uses the Submit feedback CTA label", () => {
+	assert.equal(getSubmitButtonLabel(false), "Submit feedback");
+	assert.equal(getSubmitButtonLabel(true), "Waiting for Pi…");
+});
+
+
+test("comment composer exposes a dedicated File comment action when no draft is active", () => {
+	assert.deepEqual(getComposerIdleActions(), ["File comment"]);
+});
+
+
+test("Pierre diff selection ranges are converted into anchors without defaulting to line 1", () => {
+	assert.deepEqual(
+		selectionRangeToAnchor("src/a.ts", { start: 7, end: 9, side: "additions", endSide: "additions" }),
+		{ path: "src/a.ts", startLine: 7, endLine: 9, targetSide: "new" },
+	);
+	assert.deepEqual(
+		selectionRangeToAnchor("src/a.ts", { start: 3, end: 3, side: "deletions", endSide: "deletions" }),
+		{ path: "src/a.ts", startLine: 3, endLine: 3, targetSide: "old" },
+	);
+	assert.equal(selectionRangeToAnchor("src/a.ts", null), null);
 });
 
 test("verify:diff-review-web fails when committed static assets drift", async () => {

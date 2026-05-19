@@ -57,6 +57,7 @@ export type DiffReviewComment = {
 	body: string;
 	status: "open" | "submitted" | "resolved";
 	line?: DiffLineReference;
+	createdAt?: number;
 };
 
 export type DiffReviewReply = {
@@ -73,6 +74,7 @@ export type DiffReviewThread = {
 	id: string;
 	path: string;
 	root: DiffReviewComment;
+	userReplies?: DiffReviewComment[];
 	replies: DiffReviewReply[];
 };
 
@@ -84,6 +86,7 @@ export type ReviewSubmissionRound = {
 	id: string;
 	reviewSessionId: string;
 	threadIds: string[];
+	itemIds: string[];
 	createdAt?: number;
 	completedAt?: number;
 };
@@ -117,6 +120,11 @@ export type DiffReviewReplyParams = {
 	path: string;
 	line?: DiffLineReference;
 	reply: string;
+};
+
+export type DiffReviewCompleteParams = {
+	reviewSessionId: string;
+	submissionRoundId: string;
 };
 
 export type RecordedDiffReviewReply = DiffReviewReply & {

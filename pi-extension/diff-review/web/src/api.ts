@@ -4,6 +4,7 @@ import type {
 	DiffMode,
 	DiffTree,
 	LineAnchor,
+	ReviewComment,
 	ReviewReply,
 	ReviewThread,
 	SessionClosedEvent,
@@ -53,6 +54,14 @@ export function createThread(path: string, body: string, line?: LineAnchor) {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ path, body, line }),
+	});
+}
+
+export function createThreadReply(threadId: string, body: string) {
+	return requestJson<{ reply: ReviewComment }>(`/api/threads/${encodeURIComponent(threadId)}/replies`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ body }),
 	});
 }
 

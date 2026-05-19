@@ -1,6 +1,13 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { DiffReviewReplyParams, RecordedDiffReviewReply, ReviewSession, TargetSide } from "./types.ts";
+import { completeSubmissionRound } from "./state.ts";
+import type {
+	DiffReviewCompleteParams,
+	DiffReviewReplyParams,
+	RecordedDiffReviewReply,
+	ReviewSession,
+	TargetSide,
+} from "./types.ts";
 
 function validateLine(line: DiffReviewReplyParams["line"]) {
 	if (line == null) {
@@ -38,9 +45,11 @@ function findThread(session: ReviewSession, params: DiffReviewReplyParams) {
 		}
 		return thread;
 	}
-	const thread = session.threads.find(
-		(candidate) => candidate.root.id === params.commentId || candidate.replies.some((reply) => reply.id === params.commentId),
-	);
+	const thread = session.threads.find((candidate) => {
+		if (candidate.root.id === params.commentId) return true;
+		if ((candidate.userReplies ?? []).some((reply) => reply.id === params.commentId)) return true;
+		return candidate.replies.some((reply) => reply.id === params.commentId);
+	});
 	if (!thread) {
 		throw new Error("Unknown comment target");
 	}
@@ -96,6 +105,22 @@ export async function recordReply(
 	return recordedReply;
 }
 
+export async function recordCompletion(
+	store: {
+		getById(reviewSessionId: string): ReviewSession | null;
+		emitSessionState?: (session: ReviewSession) => void;
+	},
+	params: DiffReviewCompleteParams,
+) {
+	const session = store.getById(params.reviewSessionId);
+	if (!session) {
+		throw new Error("Unknown review session");
+	}
+	const completedRound = completeSubmissionRound(session, params.submissionRoundId);
+	store.emitSessionState?.(session);
+	return completedRound;
+}
+
 export function createDiffReviewReplyTool(store: {
 	getById(reviewSessionId: string): ReviewSession | null;
 	appendReply?: (reply: RecordedDiffReviewReply) => RecordedDiffReviewReply;
@@ -134,6 +159,33 @@ export function createDiffReviewReplyTool(store: {
 	});
 }
 
+export function createDiffReviewCompleteTool(store: {
+	getById(reviewSessionId: string): ReviewSession | null;
+	emitSessionState?: (session: ReviewSession) => void;
+}) {
+	return defineTool({
+		name: "diff_review_complete",
+		label: "Diff Review Complete",
+		description: "Mark a diff review submission round complete and unlock the browser UI",
+		parameters: Type.Object({
+			reviewSessionId: Type.String(),
+			submissionRoundId: Type.String(),
+		}),
+		async execute(_toolCallId: string, params: DiffReviewCompleteParams) {
+			const completedRound = await recordCompletion(store, params);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Completed diff review round ${completedRound.id}.`,
+					},
+				],
+				details: completedRound,
+			};
+		},
+	});
+}
+
 export function registerDiffReviewReplyTool(
 	pi: ExtensionAPI,
 	store: {
@@ -142,4 +194,14 @@ export function registerDiffReviewReplyTool(
 	},
 ) {
 	pi.registerTool(createDiffReviewReplyTool(store));
+}
+
+export function registerDiffReviewCompleteTool(
+	pi: ExtensionAPI,
+	store: {
+		getById(reviewSessionId: string): ReviewSession | null;
+		emitSessionState?: (session: ReviewSession) => void;
+	},
+) {
+	pi.registerTool(createDiffReviewCompleteTool(store));
 }

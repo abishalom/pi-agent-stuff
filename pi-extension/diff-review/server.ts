@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { createDiffProvider } from "./git.ts";
-import { appendThread, completeSubmissionRound, submitReview } from "./state.ts";
+import { appendThread, appendThreadReply, completeSubmissionRound, submitReview } from "./state.ts";
 import type { ReviewSession } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
@@ -194,6 +194,22 @@ export async function startReviewServer(
 				});
 				return json(res, 200, { thread });
 			}
+			const replyMatch = /^\/api\/threads\/([^/]+)\/replies$/.exec(url.pathname);
+			if (req.method === "POST" && replyMatch) {
+				const body = await readJsonBody(req);
+				if (typeof body.body !== "string" || body.body.trim() === "") {
+					return json(res, 400, { error: "body is required" });
+				}
+				try {
+					const reply = appendThreadReply(session, {
+						threadId: decodeURIComponent(replyMatch[1]),
+						body: body.body.trim(),
+					});
+					return json(res, 200, { reply });
+				} catch (error) {
+					return json(res, 404, { error: error instanceof Error ? error.message : String(error) });
+				}
+			}
 			if (req.method === "POST" && url.pathname === "/api/diff-mode") {
 				const body = await readJsonBody(req);
 				if (body.requestedMode !== "working-tree-vs-head" && body.requestedMode !== "merge-base-vs-head") {
@@ -226,7 +242,11 @@ export async function startReviewServer(
 			}
 			const completeMatch = /^\/api\/rounds\/([^/]+)\/complete$/.exec(url.pathname);
 			if (req.method === "POST" && completeMatch) {
-				completeSubmissionRound(session, decodeURIComponent(completeMatch[1]));
+				try {
+					completeSubmissionRound(session, decodeURIComponent(completeMatch[1]));
+				} catch (error) {
+					throw new ReviewServerHttpError(409, "invalid-submission-round", error instanceof Error ? error.message : String(error));
+				}
 				deps.store.emitSessionState(session);
 				return json(res, 200, { pendingSubmission: session.pendingSubmission, submissionHistory: session.submissionHistory });
 			}

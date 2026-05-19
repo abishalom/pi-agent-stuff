@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
-import { createDiffReviewReplyTool, recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
+import { createDiffReviewCompleteTool, createDiffReviewReplyTool, recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
 import { createDiffReviewExtension } from "../../pi-extension/diff-review/index.ts";
 import { shutdownSessionsForPiSessionKey } from "../../pi-extension/diff-review/cleanup.ts";
 
@@ -115,12 +115,13 @@ function makeSessionSeed() {
 	};
 }
 
-test("diff-review extension registers command and reply tool", () => {
+test("diff-review extension registers command and diff-review tools", () => {
 	const pi = createFakePi();
 	createDiffReviewExtension()(pi);
 
 	assert.ok(pi.commands.has("diff-review"));
 	assert.ok(pi.tools.has("diff_review_reply"));
+	assert.ok(pi.tools.has("diff_review_complete"));
 	assert.ok(pi.events.has("session_shutdown"));
 });
 
@@ -325,6 +326,39 @@ test("reply tool execute returns a Pi tool result envelope", async () => {
 	assert.match(result.content[0]?.text ?? "", /src\/a\.ts/);
 	assert.equal(result.details.path, "src/a.ts");
 	assert.equal(result.details.reply, "Looks good");
+});
+
+
+test("completion tool execute clears the active round and archives it", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create(makeSessionSeed());
+	const tool = createDiffReviewCompleteTool(store);
+
+	const result = await tool.execute("tool-call-2", {
+		reviewSessionId: session.reviewSessionId,
+		submissionRoundId: "round-1",
+	});
+
+	assert.ok(Array.isArray(result.content));
+	assert.equal(result.content[0]?.type, "text");
+	assert.match(result.content[0]?.text ?? "", /round-1/);
+	assert.equal(session.pendingSubmission, null);
+	assert.equal(session.submissionHistory.at(-1)?.id, "round-1");
+});
+
+
+test("completion tool rejects stale or mismatched round ids", async () => {
+	const store = createReviewSessionStore();
+	const session = store.create(makeSessionSeed());
+	const tool = createDiffReviewCompleteTool(store);
+
+	await assert.rejects(
+		() => tool.execute("tool-call-3", {
+			reviewSessionId: session.reviewSessionId,
+			submissionRoundId: "round-999",
+		}),
+		/submission round/i,
+	);
 });
 
 test("reply tool rejects malformed or unknown payloads", async () => {

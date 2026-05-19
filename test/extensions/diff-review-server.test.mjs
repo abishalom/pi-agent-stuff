@@ -287,8 +287,26 @@ test("browser-created threads are persisted and included in submit prompts", asy
 	});
 	assert.equal(submit.status, 200);
 	assert.match(started.sentPrompts[0], /Files in scope:\n- "src\/a\.ts"/);
-	assert.match(started.sentPrompts[0], /Open comments in this submission round:\n- threadId="thread-\d+"; commentId="comment-\d+"; pathJson="src\/a\.ts"/);
+	assert.match(started.sentPrompts[0], /Thread timeline for this submission round:\n- threadId="thread-\d+"; commentId="comment-\d+"; pathJson="src\/a\.ts"/);
 	assert.match(started.sentPrompts[0], /What do you think about this change\?/);
+});
+
+
+test("browser can add a follow-up reply inside an existing thread and inherit its anchor", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root);
+	t.after(() => started.close());
+
+	const result = await postJson(`${started.baseUrl}/api/threads/thread-1/replies?secret=${started.session.serverSecret}`, {
+		body: "Following up in the same thread",
+	});
+
+	assert.equal(result.status, 200);
+	assert.equal(result.body.reply.path, "src/a.ts");
+	assert.deepEqual(result.body.reply.line, { startLine: 1, endLine: 1, targetSide: "new" });
+	assert.equal(started.session.threads[0].userReplies.at(-1)?.body, "Following up in the same thread");
+	assert.equal(started.session.threads[0].userReplies.at(-1)?.status, "open");
 });
 
 test("completing a Pi round clears pending state and enables another submit", async (t) => {
@@ -317,6 +335,29 @@ test("completing a Pi round clears pending state and enables another submit", as
 		body: JSON.stringify({}),
 	});
 	assert.equal(next.status, 200);
+});
+
+
+test("stale completion requests are rejected without unlocking the active round", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root);
+	t.after(() => started.close());
+
+	await fetch(`${started.baseUrl}/api/submit?secret=${started.session.serverSecret}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({}),
+	});
+	const pendingRoundId = started.session.pendingSubmission?.id;
+
+	const response = await fetch(`${started.baseUrl}/api/rounds/round-999/complete?secret=${started.session.serverSecret}`, {
+		method: "POST",
+	});
+	const result = await getJson(response);
+	assert.equal(result.status, 409);
+	assert.match(result.body.error, /submission round/i);
+	assert.equal(started.session.pendingSubmission?.id, pendingRoundId);
 });
 
 test("diff-mode switch falls back to working-tree mode when merge-base fails", async (t) => {

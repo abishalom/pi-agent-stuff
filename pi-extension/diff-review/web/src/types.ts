@@ -16,6 +16,7 @@ export type ReviewComment = {
 	body: string;
 	status: "open" | "submitted" | "resolved";
 	line?: LineAnchor;
+	createdAt?: number;
 };
 
 export type ReviewReply = {
@@ -34,6 +35,7 @@ export type ReviewThread = {
 	id: string;
 	path: string;
 	root: ReviewComment;
+	userReplies?: ReviewComment[];
 	replies: ReviewReply[];
 };
 
@@ -102,8 +104,19 @@ export type SessionClosedEvent = {
 	message?: string;
 };
 
-export type DraftComment = {
-	id: string;
-	anchor: LineAnchor;
-	text: string;
-};
+export type DraftComment =
+	| {
+		id: string;
+		kind: "thread";
+		path: string;
+		line?: LineAnchor;
+		text: string;
+	}
+	| {
+		id: string;
+		kind: "reply";
+		threadId: string;
+		path: string;
+		line?: LineAnchor;
+		text: string;
+	};

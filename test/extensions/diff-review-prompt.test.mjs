@@ -49,6 +49,7 @@ function makeSubmissionRound() {
 test("prompt synthesis includes the full submit contract and requires tool-call replies", () => {
 	const prompt = buildReviewPrompt(makeSessionWithFileAndLineComments(), makeSubmissionRound());
 	assert.match(prompt, /diff_review_reply/);
+	assert.match(prompt, /diff_review_complete/);
 	assert.match(prompt, /reviewSessionId/);
 	assert.match(prompt, /submissionRoundId/);
 	assert.match(prompt, /working-tree-vs-head/);
@@ -59,6 +60,8 @@ test("prompt synthesis includes the full submit contract and requires tool-call 
 	assert.match(prompt, /comment-1/);
 	assert.match(prompt, /thread-1/);
 	assert.match(prompt, /must call the diff_review_reply tool/i);
+	assert.match(prompt, /must call the diff_review_complete tool even if you send zero replies/i);
+	assert.match(prompt, /reply to any subset of threads, including none/i);
 	assert.match(prompt, /do not reply only with freeform chat text/i);
 });
 

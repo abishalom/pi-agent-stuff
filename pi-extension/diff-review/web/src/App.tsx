@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { connectEvents, createThread, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
+import { connectEvents, createThread, createThreadReply, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
 import { DiffToolbar } from "./components/DiffToolbar.tsx";
 import { DiffViewer } from "./components/DiffViewer.tsx";
 import { FilterBar } from "./components/FilterBar.tsx";
@@ -20,6 +20,7 @@ export function App() {
 	useEffect(() => {
 		let active = true;
 		let source: EventSource | null = null;
+		let unsubscribe: (() => void) | null = null;
 		(async () => {
 			try {
 				const payload: BootstrapPayload = await fetchSession();
@@ -27,14 +28,13 @@ export function App() {
 				const state = createReviewSessionState(payload);
 				state.applyBootstrap(payload);
 				setSessionState(state);
-				const unsubscribe = state.subscribe(() => rerender((value) => value + 1));
+				unsubscribe = state.subscribe(() => rerender((value) => value + 1));
 				source = connectEvents({
 					onSessionState: (event) => state.applySessionState(event),
 					onReply: (event) => state.applyReply(event),
 					onSessionClosed: (event) => state.applySessionClosed(event),
 					onError: (message) => state.applyConnectionError(message),
 				});
-				return () => unsubscribe();
 			} catch (error) {
 				if (!active) return;
 				setBootstrapError(error instanceof Error ? error.message : String(error));
@@ -42,6 +42,7 @@ export function App() {
 		})();
 		return () => {
 			active = false;
+			unsubscribe?.();
 			source?.close();
 		};
 	}, []);
@@ -72,12 +73,37 @@ export function App() {
 	}, [sessionState?.selectedPath]);
 
 	const visiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
+	const selectedAnchor = sessionState?.draft?.path === sessionState?.selectedPath ? sessionState.draft.line ?? null : null;
+
+	function handleStateError(error: unknown) {
+		sessionState?.applyConnectionError(error instanceof Error ? error.message : String(error));
+	}
 
 	if (bootstrapError) {
 		return <div style={{ padding: 24 }}>Unable to start diff review: {bootstrapError}</div>;
 	}
 	if (!sessionState) {
 		return <div style={{ padding: 24 }}>Loading diff review…</div>;
+	}
+
+	async function saveDraft() {
+		try {
+			if (!sessionState.draft) return;
+			if (sessionState.draft.kind === "thread") {
+				const { thread } = await createThread(
+					sessionState.draft.path,
+					sessionState.draft.text,
+					sessionState.draft.line,
+				);
+				sessionState.replaceThread(thread);
+				sessionState.clearDraft();
+				return;
+			}
+			const { reply } = await createThreadReply(sessionState.draft.threadId, sessionState.draft.text);
+			sessionState.applyUserReply({ threadId: sessionState.draft.threadId, reply });
+		} catch (error) {
+			handleStateError(error);
+		}
 	}
 
 	return (
@@ -105,38 +131,44 @@ export function App() {
 								setFileDetail(null);
 							}
 						} catch (error) {
-							sessionState.applyConnectionError(error instanceof Error ? error.message : String(error));
+							handleStateError(error);
 						}
 					}}
 					onSubmitReview={async () => {
 						try {
 							await submitReview();
 						} catch (error) {
-							sessionState.applyConnectionError(error instanceof Error ? error.message : String(error));
+							handleStateError(error);
 						}
 					}}
 				/>
-				<DiffViewer detail={fileDetail} loading={fileLoading} error={fileError} />
+				<DiffViewer
+					detail={fileDetail}
+					loading={fileLoading}
+					error={fileError}
+					selectedAnchor={selectedAnchor}
+					onSelectAnchor={(anchor) => {
+						if (anchor) {
+							sessionState.startLineDraft(anchor);
+						}
+					}}
+				/>
 			</div>}
 			right={<CommentSidebar
 				threads={sessionState.getThreadsForSelectedPath()}
 				draft={sessionState.draft}
 				pending={Boolean(sessionState.pendingSubmission)}
-				onStartDraft={() => sessionState.startDraft({ path: sessionState.selectedPath ?? sessionState.paths[0] ?? "", startLine: 1, endLine: 1, targetSide: "new" })}
-				onDraftChange={(text) => sessionState.updateDraftText(text)}
-				onSaveDraft={async () => {
-					try {
-						if (!sessionState.draft) return;
-						const { thread } = await createThread(
-							sessionState.draft.anchor.path,
-							sessionState.draft.text,
-							sessionState.draft.anchor,
-						);
-						sessionState.commitDraftToThread(thread);
-					} catch (error) {
-						sessionState.applyConnectionError(error instanceof Error ? error.message : String(error));
-					}
+				onStartFileComment={() => {
+					const path = sessionState.selectedPath ?? sessionState.paths[0] ?? "";
+					if (!path) return;
+					sessionState.startFileDraft(path);
 				}}
+				onDraftChange={(text) => sessionState.updateDraftText(text)}
+				onSaveDraft={saveDraft}
+				onCancelDraft={() => sessionState.clearDraft()}
+				onStartReply={(threadId) => sessionState.startReplyDraft(threadId)}
+				onToggleThreadCollapsed={(threadId) => sessionState.toggleThreadCollapsed(threadId)}
+				isThreadCollapsed={(threadId) => sessionState.isThreadCollapsed(threadId)}
 			/>}
 		/>
 	);

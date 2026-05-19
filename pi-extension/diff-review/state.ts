@@ -1,46 +1,14 @@
 import { buildReviewPrompt } from "./prompt.ts";
-import type { RecordedDiffReviewReply, ReviewSession, ReviewSessionSeed, ReviewSubmissionRound } from "./types.ts";
+import type {
+	DiffReviewComment,
+	RecordedDiffReviewReply,
+	ReviewSession,
+	ReviewSessionSeed,
+	ReviewSubmissionRound,
+} from "./types.ts";
 
 function makeStoreKey(piSessionKey: string, repoRoot: string) {
 	return JSON.stringify([piSessionKey, repoRoot]);
-}
-
-function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): ReviewSession {
-	const pendingSubmission = seed.pendingSubmission
-		? {
-			...seed.pendingSubmission,
-			reviewSessionId,
-		  }
-		: null;
-	const threads = seed.threads ? [...seed.threads] : [];
-	const submissionHistory = seed.submissionHistory ? [...seed.submissionHistory] : [];
-
-	return {
-		piSessionKey: seed.piSessionKey,
-		repoRoot: seed.repoRoot,
-		reviewSessionId,
-		serverSecret: seed.serverSecret ?? `server-secret-${reviewSessionId}`,
-		diffMode: seed.diffMode ?? "working-tree-vs-head",
-		files: seed.files ? [...seed.files] : [],
-		threads,
-		pendingSubmission,
-		submissionHistory,
-		nextSubmissionRound:
-			seed.nextSubmissionRound ??
-			Math.max(
-				pendingSubmission ? parseRoundNumber(pendingSubmission.id) + 1 : 1,
-				...submissionHistory.map((round) => parseRoundNumber(round.id) + 1),
-			),
-		nextThreadId:
-			seed.nextThreadId ??
-			Math.max(1, ...threads.map((thread) => parseThreadNumber(thread.id) + 1)),
-		nextCommentId:
-			seed.nextCommentId ??
-			Math.max(1, ...threads.map((thread) => parseCommentNumber(thread.root.id) + 1)),
-		nextReplyId:
-			seed.nextReplyId ??
-			Math.max(1, ...threads.flatMap((thread) => thread.replies.map((reply) => parseReplyNumber(reply.id) + 1))),
-	};
 }
 
 function parseRoundNumber(roundId: string) {
@@ -68,19 +36,120 @@ function parseReviewSessionNumber(reviewSessionId: string) {
 	return match ? Number(match[1]) : 0;
 }
 
+function cloneComment(comment: DiffReviewComment): DiffReviewComment {
+	return { ...comment, line: comment.line ? { ...comment.line } : undefined };
+}
+
+function cloneThread(thread: ReviewSession["threads"][number]): ReviewSession["threads"][number] {
+	return {
+		...thread,
+		root: cloneComment(thread.root),
+		userReplies: (thread.userReplies ?? []).map((reply) => cloneComment(reply)),
+		replies: [...thread.replies],
+	};
+}
+
+function findThread(session: ReviewSession, threadId: string) {
+	return session.threads.find((candidate) => candidate.id === threadId) ?? null;
+}
+
+function deriveRoundItemIds(threadIds: string[], threads: ReviewSession["threads"]) {
+	return threadIds.flatMap((threadId) => {
+		const thread = threads.find((candidate) => candidate.id === threadId);
+		return thread ? [thread.root.id] : [];
+	});
+}
+
+function normalizeRound(
+	round: ReviewSubmissionRound,
+	reviewSessionId: string,
+	threads: ReviewSession["threads"],
+): ReviewSubmissionRound {
+	return {
+		...round,
+		reviewSessionId,
+		threadIds: [...round.threadIds],
+		itemIds: round.itemIds ? [...round.itemIds] : deriveRoundItemIds(round.threadIds, threads),
+	};
+}
+
+function normalizeSession(seed: ReviewSessionSeed, reviewSessionId: string): ReviewSession {
+	const threads = (seed.threads ?? []).map((thread) => cloneThread(thread));
+	const pendingSubmission = seed.pendingSubmission
+		? normalizeRound(seed.pendingSubmission, reviewSessionId, threads)
+		: null;
+	const submissionHistory = (seed.submissionHistory ?? []).map((round) => normalizeRound(round, reviewSessionId, threads));
+
+	return {
+		piSessionKey: seed.piSessionKey,
+		repoRoot: seed.repoRoot,
+		reviewSessionId,
+		serverSecret: seed.serverSecret ?? `server-secret-${reviewSessionId}`,
+		diffMode: seed.diffMode ?? "working-tree-vs-head",
+		files: seed.files ? [...seed.files] : [],
+		threads,
+		pendingSubmission,
+		submissionHistory,
+		nextSubmissionRound:
+			seed.nextSubmissionRound ??
+			Math.max(
+				pendingSubmission ? parseRoundNumber(pendingSubmission.id) + 1 : 1,
+				...submissionHistory.map((round) => parseRoundNumber(round.id) + 1),
+			),
+		nextThreadId:
+			seed.nextThreadId ??
+			Math.max(1, ...threads.map((thread) => parseThreadNumber(thread.id) + 1)),
+		nextCommentId:
+			seed.nextCommentId ??
+			Math.max(
+				1,
+				...threads.flatMap((thread) => [
+					parseCommentNumber(thread.root.id) + 1,
+					...(thread.userReplies ?? []).map((reply) => parseCommentNumber(reply.id) + 1),
+				]),
+			),
+		nextReplyId:
+			seed.nextReplyId ??
+			Math.max(1, ...threads.flatMap((thread) => thread.replies.map((reply) => parseReplyNumber(reply.id) + 1))),
+	};
+}
+
+function collectOpenItems(session: ReviewSession) {
+	return session.threads.flatMap((thread) => {
+		const openItems: Array<{ threadId: string; itemId: string }> = [];
+		if (thread.root.status === "open") {
+			openItems.push({ threadId: thread.id, itemId: thread.root.id });
+		}
+		for (const reply of thread.userReplies ?? []) {
+			if (reply.status === "open") {
+				openItems.push({ threadId: thread.id, itemId: reply.id });
+			}
+		}
+		return openItems;
+	});
+}
+
 function createSubmissionRound(session: ReviewSession): ReviewSubmissionRound {
+	const openItems = collectOpenItems(session);
 	return {
 		id: `round-${session.nextSubmissionRound}`,
 		reviewSessionId: session.reviewSessionId,
-		threadIds: session.threads.filter((thread) => thread.root.status === "open").map((thread) => thread.id),
+		threadIds: [...new Set(openItems.map((item) => item.threadId))],
+		itemIds: openItems.map((item) => item.itemId),
 		createdAt: Date.now(),
 	};
 }
 
-function markThreadsSubmitted(session: ReviewSession, threadIds: string[]) {
+function markSubmitted(session: ReviewSession, itemIds: string[]) {
+	const itemIdSet = new Set(itemIds);
 	for (const thread of session.threads) {
-		if (threadIds.includes(thread.id)) {
+		if (itemIdSet.has(thread.root.id)) {
 			thread.root.status = "submitted";
+		}
+		for (const reply of thread.userReplies ?? []) {
+			if (itemIdSet.has(reply.id)) {
+				reply.status = "submitted";
+			}
 		}
 	}
 }
@@ -88,7 +157,7 @@ function markThreadsSubmitted(session: ReviewSession, threadIds: string[]) {
 type ReviewSessionEvent =
 	| { type: "reply"; payload: RecordedDiffReviewReply }
 	| { type: "session-state"; payload: ReviewSession }
-	| { type: "session-closed"; payload: { reviewSessionId: string } };
+	| { type: "session-closed"; payload: { reviewSessionId: string; message?: string } };
 
 type SessionServerHandle = {
 	baseUrl: string;
@@ -156,15 +225,15 @@ export function createReviewSessionStore() {
 		emitSessionState(session: ReviewSession) {
 			emit(session.reviewSessionId, { type: "session-state", payload: session });
 		},
-		emitSessionClosed(reviewSessionId: string) {
-			emit(reviewSessionId, { type: "session-closed", payload: { reviewSessionId } });
+		emitSessionClosed(reviewSessionId: string, message?: string) {
+			emit(reviewSessionId, { type: "session-closed", payload: { reviewSessionId, message } });
 		},
 		appendReply(reply: RecordedDiffReviewReply) {
 			const session = byId.get(reply.reviewSessionId);
 			if (!session) {
 				throw new Error("Unknown review session");
 			}
-			const thread = session.threads.find((candidate) => candidate.id === reply.threadId);
+			const thread = findThread(session, reply.threadId);
 			if (!thread) {
 				throw new Error("Unknown thread target");
 			}
@@ -197,7 +266,9 @@ export function appendThread(
 			body: input.body,
 			status: "open" as const,
 			line: input.line,
+			createdAt: Date.now(),
 		},
+		userReplies: [],
 		replies: [],
 	};
 	if (!session.files.some((file) => file.path === input.path)) {
@@ -207,7 +278,30 @@ export function appendThread(
 	return thread;
 }
 
-export async function submitReview(session: ReviewSession, injectMessage: (prompt: string, round: ReviewSubmissionRound) => Promise<void> | void) {
+export function appendThreadReply(
+	session: ReviewSession,
+	input: { threadId: string; body: string },
+) {
+	const thread = findThread(session, input.threadId);
+	if (!thread) {
+		throw new Error("Unknown thread target");
+	}
+	const reply: DiffReviewComment = {
+		id: `comment-${session.nextCommentId++}`,
+		path: thread.path,
+		body: input.body,
+		status: "open",
+		line: thread.root.line,
+		createdAt: Date.now(),
+	};
+	thread.userReplies = [...(thread.userReplies ?? []), reply];
+	return reply;
+}
+
+export async function submitReview(
+	session: ReviewSession,
+	injectMessage: (prompt: string, round: ReviewSubmissionRound) => Promise<void> | void,
+) {
 	if (session.pendingSubmission) {
 		throw new Error("Review submission already pending");
 	}
@@ -216,17 +310,24 @@ export async function submitReview(session: ReviewSession, injectMessage: (promp
 	await injectMessage(prompt, round);
 	session.pendingSubmission = round;
 	session.nextSubmissionRound += 1;
-	markThreadsSubmitted(session, round.threadIds);
+	markSubmitted(session, round.itemIds);
 	return round;
 }
 
 export function completeSubmissionRound(session: ReviewSession, roundId: string) {
-	if (session.pendingSubmission?.id !== roundId) {
-		return;
+	if (!session.pendingSubmission) {
+		throw new Error("No pending submission round");
 	}
-	session.submissionHistory.push({
+	if (session.pendingSubmission.id !== roundId) {
+		throw new Error(`Unknown submission round: ${roundId}`);
+	}
+	const completedRound = {
 		...session.pendingSubmission,
+		threadIds: [...session.pendingSubmission.threadIds],
+		itemIds: [...session.pendingSubmission.itemIds],
 		completedAt: Date.now(),
-	});
+	};
+	session.submissionHistory.push(completedRound);
 	session.pendingSubmission = null;
+	return completedRound;
 }

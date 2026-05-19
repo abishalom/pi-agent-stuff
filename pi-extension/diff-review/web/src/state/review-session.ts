@@ -3,6 +3,7 @@ import type {
 	ConnectionState,
 	DraftComment,
 	LineAnchor,
+	ReviewComment,
 	ReviewReply,
 	ReviewThread,
 	SessionClosedEvent,
@@ -11,9 +12,31 @@ import type {
 
 export type ReviewSessionState = ReturnType<typeof createReviewSessionState>;
 
+function cloneComment(comment: ReviewComment): ReviewComment {
+	return { ...comment, line: comment.line ? { ...comment.line } : undefined };
+}
+
+function cloneThread(thread: ReviewThread): ReviewThread {
+	return {
+		...thread,
+		root: cloneComment(thread.root),
+		userReplies: (thread.userReplies ?? []).map((reply) => cloneComment(reply)),
+		replies: [...thread.replies],
+	};
+}
+
+function cloneThreads(threads: ReviewThread[]) {
+	return threads.map((thread) => cloneThread(thread));
+}
+
+function findThread(threads: ReviewThread[], threadId: string) {
+	return threads.find((candidate) => candidate.id === threadId) ?? null;
+}
+
 export function createReviewSessionState(payload: BootstrapPayload) {
 	let nextDraftId = 1;
 	const listeners = new Set<() => void>();
+	const collapsedThreadIds = new Set<string>();
 	const state = {
 		reviewSessionId: payload.reviewSessionId,
 		repoRoot: payload.repoRoot,
@@ -51,9 +74,28 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			}
 			state.emit();
 		},
-		startDraft(anchor: LineAnchor) {
-			state.selectedPath = anchor.path;
-			state.draft = { id: `draft-${nextDraftId++}` , anchor, text: "" };
+		startFileDraft(path: string) {
+			state.selectedPath = path;
+			state.draft = { id: `draft-${nextDraftId++}`, kind: "thread", path, text: "" };
+			state.emit();
+		},
+		startLineDraft(line: LineAnchor) {
+			state.selectedPath = line.path;
+			state.draft = { id: `draft-${nextDraftId++}`, kind: "thread", path: line.path, line, text: "" };
+			state.emit();
+		},
+		startReplyDraft(threadId: string) {
+			const thread = findThread(state.threads, threadId);
+			if (!thread) return;
+			state.selectedPath = thread.path;
+			state.draft = {
+				id: `draft-${nextDraftId++}`,
+				kind: "reply",
+				threadId,
+				path: thread.path,
+				line: thread.root.line,
+				text: "",
+			};
 			state.emit();
 		},
 		updateDraftText(text: string) {
@@ -65,27 +107,38 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.draft = null;
 			state.emit();
 		},
-		commitDraftToThread(thread?: ReviewThread | null) {
-			if (!state.draft || !state.draft.text.trim()) return null;
-			const nextThread: ReviewThread = thread ?? {
-				id: `local-thread-${Date.now()}`,
-				path: state.draft.anchor.path,
-				root: {
-					id: `local-comment-${Date.now()}`,
-					path: state.draft.anchor.path,
-					body: state.draft.text.trim(),
-					status: "open",
-					line: state.draft.anchor,
-				},
-				replies: [],
-			};
+		replaceThread(thread: ReviewThread, options?: { emit?: boolean }) {
+			const nextThread = cloneThread(thread);
+			const existingIndex = state.threads.findIndex((candidate) => candidate.id === thread.id);
+			if (existingIndex >= 0) {
+				state.threads = state.threads.map((candidate, index) => index === existingIndex ? nextThread : candidate);
+			} else {
+				state.threads = [...state.threads, nextThread];
+			}
 			if (!state.files.some((file) => file.path === nextThread.path)) {
 				state.files = [...state.files, { path: nextThread.path }];
 			}
-			state.threads = [...state.threads, nextThread];
-			state.draft = null;
+			if (options?.emit !== false) {
+				state.emit();
+			}
+		},
+		applyUserReply(event: { threadId: string; reply: ReviewComment }) {
+			const thread = findThread(state.threads, event.threadId);
+			if (!thread) return;
+			thread.userReplies = [...(thread.userReplies ?? []), cloneComment(event.reply)];
+			state.draft = state.draft?.kind === "reply" && state.draft.threadId === event.threadId ? null : state.draft;
 			state.emit();
-			return nextThread;
+		},
+		toggleThreadCollapsed(threadId: string) {
+			if (collapsedThreadIds.has(threadId)) {
+				collapsedThreadIds.delete(threadId);
+			} else {
+				collapsedThreadIds.add(threadId);
+			}
+			state.emit();
+		},
+		isThreadCollapsed(threadId: string) {
+			return collapsedThreadIds.has(threadId);
 		},
 		applyBootstrap(next: BootstrapPayload) {
 			state.reviewSessionId = next.reviewSessionId;
@@ -126,7 +179,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.emit();
 		},
 		applyReply(event: ReviewReply) {
-			const thread = state.threads.find((candidate) => candidate.id === event.threadId);
+			const thread = event.threadId ? findThread(state.threads, event.threadId) : null;
 			if (thread) {
 				thread.replies = [...thread.replies, event];
 			} else {
@@ -140,6 +193,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 						status: "submitted",
 						line: event.line,
 					},
+					userReplies: [],
 					replies: [event],
 				}];
 			}
@@ -173,12 +227,4 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		},
 	};
 	return state;
-}
-
-function cloneThreads(threads: ReviewThread[]) {
-	return threads.map((thread) => ({
-		...thread,
-		root: { ...thread.root },
-		replies: [...thread.replies],
-	}));
 }
