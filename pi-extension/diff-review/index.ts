@@ -26,6 +26,7 @@ export function createDiffReviewExtension(deps?: {
 	const reviewSessionStore = createReviewSessionStore();
 	const startServer = deps?.startServer ?? startReviewServer;
 	const shutdown = deps?.shutdownSessionsForPiSessionKey ?? shutdownSessionsForPiSessionKey;
+	const pendingServerStarts = new Map<string, Promise<{ baseUrl: string; close(): Promise<void> | void }>>();
 
 	return function diffReviewExtension(pi: ExtensionAPI) {
 		pi.registerCommand("diff-review", {
@@ -40,12 +41,25 @@ export function createDiffReviewExtension(deps?: {
 				await (await createDiffProvider({ repoRoot, diffMode: session.diffMode })).loadModeState();
 				let server = reviewSessionStore.getServer(session.reviewSessionId);
 				if (!server) {
-					server = await startServer(session, {
-						store: reviewSessionStore,
-						isPiIdle: () => ctx.isIdle(),
-						sendUserMessage: (prompt) => pi.sendUserMessage(prompt),
-					});
-					reviewSessionStore.attachServer(session.reviewSessionId, server);
+					let pending = pendingServerStarts.get(session.reviewSessionId);
+					if (!pending) {
+						pending = (async () => {
+							const startedServer = await startServer(session, {
+								store: reviewSessionStore,
+								isPiIdle: () => ctx.isIdle(),
+								sendUserMessage: (prompt) => pi.sendUserMessage(prompt),
+							});
+							reviewSessionStore.attachServer(session.reviewSessionId, startedServer);
+							return startedServer;
+						})();
+						pendingServerStarts.set(session.reviewSessionId, pending);
+						pending.finally(() => {
+							if (pendingServerStarts.get(session.reviewSessionId) === pending) {
+								pendingServerStarts.delete(session.reviewSessionId);
+							}
+						});
+					}
+					server = await pending;
 				}
 				ctx.ui.notify(`Diff review ready: ${server.baseUrl}?secret=${session.serverSecret}`, "info");
 			},

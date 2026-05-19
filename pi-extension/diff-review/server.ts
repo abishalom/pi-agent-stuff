@@ -1,9 +1,24 @@
-import { createServer } from "node:http";
+import { execFile } from "node:child_process";
 import { readFile as defaultReadFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { promisify } from "node:util";
 
 import { createDiffProvider } from "./git.ts";
 import { completeSubmissionRound, submitReview } from "./state.ts";
 import type { ReviewSession } from "./types.ts";
+
+const execFileAsync = promisify(execFile);
+
+class ReviewServerHttpError extends Error {
+	statusCode: number;
+	code: string;
+
+	constructor(statusCode: number, code: string, message: string) {
+		super(message);
+		this.statusCode = statusCode;
+		this.code = code;
+	}
+}
 
 function json(res: import("node:http").ServerResponse, status: number, body: unknown) {
 	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -27,8 +42,30 @@ async function readJsonBody(req: import("node:http").IncomingMessage) {
 	return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function withProvider(session: ReviewSession, deps: { readFileImpl?: typeof defaultReadFile }, action: (provider: Awaited<ReturnType<typeof createDiffProvider>>) => Promise<void>) {
-	const provider = await createDiffProvider({
+async function ensureRepoReady(repoRoot: string) {
+	try {
+		await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd: repoRoot, encoding: "utf8" });
+	} catch {
+		throw new ReviewServerHttpError(400, "not-a-git-repo", `Not a git repo: ${repoRoot}`);
+	}
+	try {
+		await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+	} catch {
+		throw new ReviewServerHttpError(400, "missing-head", `Git repo at ${repoRoot} is missing HEAD`);
+	}
+}
+
+async function withProvider(
+	session: ReviewSession,
+	deps: {
+		readFileImpl?: typeof defaultReadFile;
+		createDiffProvider?: typeof createDiffProvider;
+	},
+	action: (provider: Awaited<ReturnType<typeof createDiffProvider>>) => Promise<void>,
+) {
+	await ensureRepoReady(session.repoRoot);
+	const makeProvider = deps.createDiffProvider ?? createDiffProvider;
+	const provider = await makeProvider({
 		repoRoot: session.repoRoot,
 		diffMode: session.diffMode,
 		readFileImpl: deps.readFileImpl,
@@ -57,6 +94,7 @@ export async function startReviewServer(
 		isPiIdle(): boolean;
 		sendUserMessage(prompt: string): Promise<void> | void;
 		readFileImpl?: typeof defaultReadFile;
+		createDiffProvider?: typeof createDiffProvider;
 		port?: number;
 	},
 ) {
@@ -128,9 +166,11 @@ export async function startReviewServer(
 			}
 			return json(res, 404, { error: "not found" });
 		} catch (error) {
+			if (error instanceof ReviewServerHttpError) {
+				return json(res, error.statusCode, { error: error.message, code: error.code });
+			}
 			const message = error instanceof Error ? error.message : String(error);
-			const status = /git repo|HEAD/i.test(message) ? 400 : 500;
-			return json(res, status, { error: message });
+			return json(res, 500, { error: message });
 		}
 	});
 

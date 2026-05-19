@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
 import { recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
 import { createDiffReviewExtension } from "../../pi-extension/diff-review/index.ts";
+import { shutdownSessionsForPiSessionKey } from "../../pi-extension/diff-review/cleanup.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -144,6 +145,39 @@ test("/diff-review reuses an existing session for the same repo", async (t) => {
 	assert.match(ctx.notifications[0].message, /127\.0\.0\.1/);
 });
 
+test("/diff-review concurrent reuse creates only one server when handlers overlap", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const pi = createFakePi();
+	let createdServerCount = 0;
+	let releaseStartup;
+	let firstStartupEntered;
+	const startupGate = new Promise((resolve) => {
+		releaseStartup = resolve;
+	});
+	const startupEntered = new Promise((resolve) => {
+		firstStartupEntered = resolve;
+	});
+	createDiffReviewExtension({
+		startServer: async () => {
+			createdServerCount += 1;
+			firstStartupEntered();
+			await startupGate;
+			return { baseUrl: "http://127.0.0.1:4321", close: async () => {} };
+		},
+	})(pi);
+	const ctx = makeCommandContext({ piSessionKey: "s1", cwd: repo.root });
+
+	const first = pi.commands.get("diff-review").handler("", ctx);
+	await startupEntered;
+	const second = pi.commands.get("diff-review").handler("", ctx);
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	assert.equal(createdServerCount, 1);
+	releaseStartup();
+	await Promise.all([first, second]);
+	assert.equal(createdServerCount, 1);
+});
+
 test("session shutdown closes active diff review sessions for the Pi session key", async (t) => {
 	const repo = await createTempRepoFixture();
 	t.after(() => repo.cleanup());
@@ -161,6 +195,41 @@ test("session shutdown closes active diff review sessions for the Pi session key
 	await pi.events.get("session_shutdown")({}, ctx);
 
 	assert.equal(shutdowns, 1);
+});
+
+test("shutdown cleanup continues past close failures and removes all sessions", async () => {
+	const closed = [];
+	const detached = [];
+	const removed = [];
+	await assert.rejects(
+		() => shutdownSessionsForPiSessionKey(
+			{
+				listByPiSessionKey() {
+					return [{ reviewSessionId: "a" }, { reviewSessionId: "b" }];
+				},
+				emitSessionClosed() {},
+				getServer(reviewSessionId) {
+					return {
+						async close() {
+							closed.push(reviewSessionId);
+							if (reviewSessionId === "a") throw new Error("close failed");
+						},
+					};
+				},
+				detachServer(reviewSessionId) {
+					detached.push(reviewSessionId);
+				},
+				remove(reviewSessionId) {
+					removed.push(reviewSessionId);
+				},
+			},
+			"s1",
+		),
+		/close failed/i,
+	);
+	assert.deepEqual(closed, ["a", "b"]);
+	assert.deepEqual(detached, ["a", "b"]);
+	assert.deepEqual(removed, ["a", "b"]);
 });
 
 test("reply tool accepts thread target with path and optional line reference", async () => {

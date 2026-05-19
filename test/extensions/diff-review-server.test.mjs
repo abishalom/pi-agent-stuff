@@ -10,6 +10,12 @@ import { promisify } from "node:util";
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
 import { startReviewServer } from "../../pi-extension/diff-review/server.ts";
 
+class UnexpectedHeadError extends Error {
+	constructor() {
+		super("unexpected HEAD explosion");
+	}
+}
+
 const execFileAsync = promisify(execFile);
 
 async function run(command, args, cwd) {
@@ -89,6 +95,7 @@ async function startTestServer(repoRoot, overrides = {}) {
 			sentPrompts.push(prompt);
 		},
 		readFileImpl: overrides.readFileImpl,
+		createDiffProvider: overrides.createDiffProvider,
 	});
 	return { ...server, store, session, sentPrompts };
 }
@@ -179,6 +186,22 @@ test("server returns clear repo error when cwd is not a git repo", async (t) => 
 	const result = await getJson(response);
 	assert.equal(result.status, 400);
 	assert.match(result.body.error, /git repo/i);
+});
+
+test("server does not classify unexpected HEAD errors as bootstrap errors", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const started = await startTestServer(repo.root, {
+		createDiffProvider: async () => {
+			throw new UnexpectedHeadError();
+		},
+	});
+	t.after(() => started.close());
+
+	const response = await fetch(`${started.baseUrl}/api/session?secret=${started.session.serverSecret}`);
+	const result = await getJson(response);
+	assert.equal(result.status, 500);
+	assert.match(result.body.error, /unexpected HEAD explosion/);
 });
 
 test("server surfaces unreadable file payloads without crashing", async (t) => {

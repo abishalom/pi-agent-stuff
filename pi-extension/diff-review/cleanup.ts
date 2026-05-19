@@ -8,10 +8,22 @@ export async function shutdownSessionsForPiSessionKey(
 	},
 	piSessionKey: string,
 ) {
+	const errors: Error[] = [];
 	for (const session of store.listByPiSessionKey(piSessionKey)) {
 		store.emitSessionClosed(session.reviewSessionId);
-		await store.getServer(session.reviewSessionId)?.close?.();
-		store.detachServer(session.reviewSessionId);
-		store.remove(session.reviewSessionId);
+		try {
+			await store.getServer(session.reviewSessionId)?.close?.();
+		} catch (error) {
+			errors.push(error instanceof Error ? error : new Error(String(error)));
+		} finally {
+			store.detachServer(session.reviewSessionId);
+			store.remove(session.reviewSessionId);
+		}
+	}
+	if (errors.length === 1) {
+		throw errors[0];
+	}
+	if (errors.length > 1) {
+		throw new AggregateError(errors, "Failed to close one or more diff review servers");
 	}
 }
