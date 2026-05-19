@@ -47,7 +47,13 @@ function findThread(session: ReviewSession, params: DiffReviewReplyParams) {
 	return thread;
 }
 
-export async function recordReply(store: { getById(reviewSessionId: string): ReviewSession | null }, params: DiffReviewReplyParams): Promise<RecordedDiffReviewReply> {
+export async function recordReply(
+	store: {
+		getById(reviewSessionId: string): ReviewSession | null;
+		appendReply?: (reply: RecordedDiffReviewReply) => RecordedDiffReviewReply;
+	},
+	params: DiffReviewReplyParams,
+): Promise<RecordedDiffReviewReply> {
 	const session = store.getById(params.reviewSessionId);
 	if (!session) {
 		throw new Error("Unknown review session");
@@ -76,18 +82,24 @@ export async function recordReply(store: { getById(reviewSessionId: string): Rev
 		id: `reply-${session.nextReplyId++}`,
 		reviewSessionId: session.reviewSessionId,
 		submissionRoundId: params.submissionRoundId,
-		threadId: params.threadId,
+		threadId: params.threadId ?? thread.id,
 		commentId: params.commentId,
 		path: params.path,
 		reply: params.reply,
 		line: params.line,
 		recordedAt: Date.now(),
 	};
+	if (store.appendReply) {
+		return store.appendReply(recordedReply);
+	}
 	thread.replies.push(recordedReply);
 	return recordedReply;
 }
 
-export function createDiffReviewReplyTool(store: { getById(reviewSessionId: string): ReviewSession | null }) {
+export function createDiffReviewReplyTool(store: {
+	getById(reviewSessionId: string): ReviewSession | null;
+	appendReply?: (reply: RecordedDiffReviewReply) => RecordedDiffReviewReply;
+}) {
 	return defineTool({
 		name: "diff_review_reply",
 		label: "Diff Review Reply",
@@ -113,6 +125,12 @@ export function createDiffReviewReplyTool(store: { getById(reviewSessionId: stri
 	});
 }
 
-export function registerDiffReviewReplyTool(pi: ExtensionAPI, store: { getById(reviewSessionId: string): ReviewSession | null }) {
+export function registerDiffReviewReplyTool(
+	pi: ExtensionAPI,
+	store: {
+		getById(reviewSessionId: string): ReviewSession | null;
+		appendReply?: (reply: RecordedDiffReviewReply) => RecordedDiffReviewReply;
+	},
+) {
 	pi.registerTool(createDiffReviewReplyTool(store));
 }

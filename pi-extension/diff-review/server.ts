@@ -1,0 +1,173 @@
+import { createServer } from "node:http";
+import { readFile as defaultReadFile } from "node:fs/promises";
+
+import { createDiffProvider } from "./git.ts";
+import { completeSubmissionRound, submitReview } from "./state.ts";
+import type { ReviewSession } from "./types.ts";
+
+function json(res: import("node:http").ServerResponse, status: number, body: unknown) {
+	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+	res.end(JSON.stringify(body));
+}
+
+function getSecret(url: URL) {
+	return url.searchParams.get("secret") ?? "";
+}
+
+function isAuthorized(url: URL, serverSecret: string) {
+	return getSecret(url) === serverSecret;
+}
+
+async function readJsonBody(req: import("node:http").IncomingMessage) {
+	const chunks = [];
+	for await (const chunk of req) {
+		chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+	}
+	if (chunks.length === 0) return {};
+	return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function withProvider(session: ReviewSession, deps: { readFileImpl?: typeof defaultReadFile }, action: (provider: Awaited<ReturnType<typeof createDiffProvider>>) => Promise<void>) {
+	const provider = await createDiffProvider({
+		repoRoot: session.repoRoot,
+		diffMode: session.diffMode,
+		readFileImpl: deps.readFileImpl,
+	});
+	await action(provider);
+}
+
+function toSessionState(session: ReviewSession) {
+	return {
+		reviewSessionId: session.reviewSessionId,
+		repoRoot: session.repoRoot,
+		diffMode: session.diffMode,
+		pendingSubmission: session.pendingSubmission,
+		submissionHistory: session.submissionHistory,
+	};
+}
+
+export async function startReviewServer(
+	session: ReviewSession,
+	deps: {
+		store: {
+			subscribe(reviewSessionId: string, listener: (event: { type: string; payload: unknown }) => void): () => void;
+			emitSessionState(session: ReviewSession): void;
+			getById(reviewSessionId: string): ReviewSession | null;
+		};
+		isPiIdle(): boolean;
+		sendUserMessage(prompt: string): Promise<void> | void;
+		readFileImpl?: typeof defaultReadFile;
+		port?: number;
+	},
+) {
+	const eventStreams = new Set<import("node:http").ServerResponse>();
+	const server = createServer(async (req, res) => {
+		try {
+			const url = new URL(req.url ?? "/", "http://127.0.0.1");
+			if (url.pathname.startsWith("/api/") && !isAuthorized(url, session.serverSecret)) {
+				return json(res, 403, { error: "invalid review secret" });
+			}
+			if (req.method === "GET" && url.pathname === "/api/events") {
+				res.writeHead(200, {
+					"content-type": "text/event-stream; charset=utf-8",
+					"cache-control": "no-cache",
+					connection: "keep-alive",
+				});
+				res.write(`event: session-state\ndata: ${JSON.stringify(toSessionState(session))}\n\n`);
+				eventStreams.add(res);
+				req.on("close", () => eventStreams.delete(res));
+				return;
+			}
+			if (req.method === "GET" && url.pathname === "/api/session") {
+				return await withProvider(session, deps, async (provider) => {
+					const mode = await provider.loadModeState();
+					json(res, 200, { ...toSessionState(session), ...mode });
+				});
+			}
+			if (req.method === "GET" && url.pathname === "/api/tree") {
+				return await withProvider(session, deps, async (provider) => {
+					json(res, 200, await provider.loadTree());
+				});
+			}
+			if (req.method === "GET" && url.pathname === "/api/file") {
+				const filePath = url.searchParams.get("path");
+				if (!filePath) return json(res, 400, { error: "path is required" });
+				return await withProvider(session, deps, async (provider) => {
+					json(res, 200, await provider.loadFile(filePath));
+				});
+			}
+			if (req.method === "POST" && url.pathname === "/api/diff-mode") {
+				const body = await readJsonBody(req);
+				if (body.requestedMode !== "working-tree-vs-head" && body.requestedMode !== "merge-base-vs-head") {
+					return json(res, 400, { error: "requestedMode is required" });
+				}
+				session.diffMode = body.requestedMode;
+				return await withProvider(session, deps, async (provider) => {
+					const mode = await provider.loadModeState();
+					json(res, 200, mode);
+				});
+			}
+			if (req.method === "POST" && url.pathname === "/api/submit") {
+				if (session.pendingSubmission) {
+					return json(res, 409, { error: "review submission already pending" });
+				}
+				if (!deps.isPiIdle()) {
+					return json(res, 409, { error: "Pi session is busy" });
+				}
+				const round = await submitReview(session, async (prompt) => {
+					await deps.sendUserMessage(prompt);
+				});
+				deps.store.emitSessionState(session);
+				return json(res, 200, { roundId: round.id, pendingSubmission: session.pendingSubmission });
+			}
+			const completeMatch = /^\/api\/rounds\/([^/]+)\/complete$/.exec(url.pathname);
+			if (req.method === "POST" && completeMatch) {
+				completeSubmissionRound(session, decodeURIComponent(completeMatch[1]));
+				deps.store.emitSessionState(session);
+				return json(res, 200, { pendingSubmission: session.pendingSubmission, submissionHistory: session.submissionHistory });
+			}
+			return json(res, 404, { error: "not found" });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const status = /git repo|HEAD/i.test(message) ? 400 : 500;
+			return json(res, status, { error: message });
+		}
+	});
+
+	const unsubscribe = deps.store.subscribe(session.reviewSessionId, (event) => {
+		const payload = event.type === "session-state" ? toSessionState(event.payload as ReviewSession) : event.payload;
+		for (const stream of eventStreams) {
+			stream.write(`event: ${event.type}\ndata: ${JSON.stringify(payload)}\n\n`);
+		}
+	});
+
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", (error: NodeJS.ErrnoException) => {
+			unsubscribe();
+			if (error?.code === "EADDRINUSE") {
+				reject(new Error(`Port conflict on 127.0.0.1:${deps.port ?? 0}`));
+				return;
+			}
+			reject(error);
+		});
+		server.listen(deps.port ?? 0, "127.0.0.1", () => resolve());
+	});
+
+	const address = server.address();
+	if (!address || typeof address === "string") {
+		unsubscribe();
+		throw new Error("Failed to determine diff review server address");
+	}
+
+	return {
+		baseUrl: `http://127.0.0.1:${address.port}`,
+		async close() {
+			unsubscribe();
+			for (const stream of eventStreams) {
+				stream.end();
+			}
+			eventStreams.clear();
+			await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		},
+	};
+}

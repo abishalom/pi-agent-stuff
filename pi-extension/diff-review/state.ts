@@ -1,5 +1,5 @@
 import { buildReviewPrompt } from "./prompt.ts";
-import type { ReviewSession, ReviewSessionSeed, ReviewSubmissionRound } from "./types.ts";
+import type { RecordedDiffReviewReply, ReviewSession, ReviewSessionSeed, ReviewSubmissionRound } from "./types.ts";
 
 function makeStoreKey(piSessionKey: string, repoRoot: string) {
 	return JSON.stringify([piSessionKey, repoRoot]);
@@ -69,10 +69,28 @@ function markThreadsSubmitted(session: ReviewSession, threadIds: string[]) {
 	}
 }
 
+type ReviewSessionEvent =
+	| { type: "reply"; payload: RecordedDiffReviewReply }
+	| { type: "session-state"; payload: ReviewSession }
+	| { type: "session-closed"; payload: { reviewSessionId: string } };
+
+type SessionServerHandle = {
+	baseUrl: string;
+	close(): Promise<void> | void;
+};
+
 export function createReviewSessionStore() {
 	const byKey = new Map<string, ReviewSession>();
 	const byId = new Map<string, ReviewSession>();
+	const subscribers = new Map<string, Set<(event: ReviewSessionEvent) => void>>();
+	const serverById = new Map<string, SessionServerHandle>();
 	let nextReviewSessionId = 1;
+
+	function emit(reviewSessionId: string, event: ReviewSessionEvent) {
+		for (const subscriber of subscribers.get(reviewSessionId) ?? []) {
+			subscriber(event);
+		}
+	}
 
 	return {
 		create(seed: ReviewSessionSeed) {
@@ -94,6 +112,58 @@ export function createReviewSessionStore() {
 		},
 		getById(reviewSessionId: string) {
 			return byId.get(reviewSessionId) ?? null;
+		},
+		getByKey(piSessionKey: string, repoRoot: string) {
+			return byKey.get(makeStoreKey(piSessionKey, repoRoot)) ?? null;
+		},
+		listByPiSessionKey(piSessionKey: string) {
+			return [...byId.values()].filter((session) => session.piSessionKey === piSessionKey);
+		},
+		remove(reviewSessionId: string) {
+			const session = byId.get(reviewSessionId);
+			if (!session) return null;
+			byId.delete(reviewSessionId);
+			byKey.delete(makeStoreKey(session.piSessionKey, session.repoRoot));
+			serverById.delete(reviewSessionId);
+			subscribers.delete(reviewSessionId);
+			return session;
+		},
+		subscribe(reviewSessionId: string, listener: (event: ReviewSessionEvent) => void) {
+			const sessionSubscribers = subscribers.get(reviewSessionId) ?? new Set();
+			sessionSubscribers.add(listener);
+			subscribers.set(reviewSessionId, sessionSubscribers);
+			return () => {
+				sessionSubscribers.delete(listener);
+				if (sessionSubscribers.size === 0) subscribers.delete(reviewSessionId);
+			};
+		},
+		emitSessionState(session: ReviewSession) {
+			emit(session.reviewSessionId, { type: "session-state", payload: session });
+		},
+		emitSessionClosed(reviewSessionId: string) {
+			emit(reviewSessionId, { type: "session-closed", payload: { reviewSessionId } });
+		},
+		appendReply(reply: RecordedDiffReviewReply) {
+			const session = byId.get(reply.reviewSessionId);
+			if (!session) {
+				throw new Error("Unknown review session");
+			}
+			const thread = session.threads.find((candidate) => candidate.id === reply.threadId);
+			if (!thread) {
+				throw new Error("Unknown thread target");
+			}
+			thread.replies.push(reply);
+			emit(reply.reviewSessionId, { type: "reply", payload: reply });
+			return reply;
+		},
+		attachServer(reviewSessionId: string, server: SessionServerHandle) {
+			serverById.set(reviewSessionId, server);
+		},
+		getServer(reviewSessionId: string) {
+			return serverById.get(reviewSessionId) ?? null;
+		},
+		detachServer(reviewSessionId: string) {
+			serverById.delete(reviewSessionId);
 		},
 	};
 }

@@ -1,22 +1,72 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
 import { recordReply } from "../../pi-extension/diff-review/reply-tool.ts";
+import { createDiffReviewExtension } from "../../pi-extension/diff-review/index.ts";
+
+const execFileAsync = promisify(execFile);
+
+async function run(command, args, cwd) {
+	return execFileAsync(command, args, { cwd, encoding: "utf8" });
+}
+
+async function createTempRepoFixture() {
+	const root = await mkdtemp(path.join(tmpdir(), "diff-review-extension-"));
+	await run("git", ["init", "-q"], root);
+	await run("git", ["config", "user.email", "test@example.com"], root);
+	await run("git", ["config", "user.name", "Diff Review Test"], root);
+	await mkdir(path.join(root, "src"), { recursive: true });
+	await writeFile(path.join(root, "src", "a.ts"), "export const a = 1;\n", "utf8");
+	await run("git", ["add", "-A"], root);
+	await run("git", ["commit", "-qm", "initial"], root);
+	return {
+		root,
+		async cleanup() {
+			await rm(root, { recursive: true, force: true });
+		},
+	};
+}
 
 function createFakePi() {
 	const commands = new Map();
 	const tools = new Map();
+	const events = new Map();
 
 	return {
 		commands,
 		tools,
+		events,
 		registerCommand(name, definition) {
 			commands.set(name, definition);
 		},
 		registerTool(definition) {
 			tools.set(definition.name, definition);
 		},
+		on(name, handler) {
+			events.set(name, handler);
+		},
+	};
+}
+
+function makeCommandContext(overrides = {}) {
+	const notifications = [];
+	return {
+		piSessionKey: overrides.piSessionKey ?? "s1",
+		cwd: overrides.cwd ?? "/repo",
+		hasUI: true,
+		isIdle: overrides.isIdle ?? (() => true),
+		ui: {
+			notify(message, level) {
+				notifications.push({ message, level });
+			},
+		},
+		notifications,
 	};
 }
 
@@ -64,14 +114,53 @@ function makeSessionSeed() {
 	};
 }
 
-test("diff-review extension registers command and reply tool", async () => {
-	const { default: diffReviewExtension } = await import("../../pi-extension/diff-review/index.ts");
+test("diff-review extension registers command and reply tool", () => {
 	const pi = createFakePi();
-
-	diffReviewExtension(pi);
+	createDiffReviewExtension()(pi);
 
 	assert.ok(pi.commands.has("diff-review"));
 	assert.ok(pi.tools.has("diff_review_reply"));
+	assert.ok(pi.events.has("session_shutdown"));
+});
+
+test("/diff-review reuses an existing session for the same repo", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const pi = createFakePi();
+	let createdServerCount = 0;
+	createDiffReviewExtension({
+		startServer: async () => {
+			createdServerCount += 1;
+			return { baseUrl: "http://127.0.0.1:4321", close: async () => {} };
+		},
+	})(pi);
+	const ctx = makeCommandContext({ piSessionKey: "s1", cwd: repo.root });
+
+	await pi.commands.get("diff-review").handler("", ctx);
+	await pi.commands.get("diff-review").handler("", ctx);
+
+	assert.equal(createdServerCount, 1);
+	assert.equal(ctx.notifications.length, 2);
+	assert.match(ctx.notifications[0].message, /127\.0\.0\.1/);
+});
+
+test("session shutdown closes active diff review sessions for the Pi session key", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const pi = createFakePi();
+	let shutdowns = 0;
+	createDiffReviewExtension({
+		startServer: async () => ({ baseUrl: "http://127.0.0.1:4321", close: async () => {} }),
+		shutdownSessionsForPiSessionKey: async () => {
+			shutdowns += 1;
+		},
+	})(pi);
+	const ctx = makeCommandContext({ piSessionKey: "s1", cwd: repo.root });
+
+	await pi.commands.get("diff-review").handler("", ctx);
+	await pi.events.get("session_shutdown")({}, ctx);
+
+	assert.equal(shutdowns, 1);
 });
 
 test("reply tool accepts thread target with path and optional line reference", async () => {
