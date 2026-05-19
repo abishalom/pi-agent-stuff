@@ -69,12 +69,22 @@ export function getThreadCardLayout(collapsed: boolean, isFocused: boolean) {
 		boxShadow: isFocused ? "0 0 0 1px rgba(37,99,235,0.2)" : undefined,
 		gap: collapsed ? 6 : 10,
 		headerGap: collapsed ? 8 : 10,
-		height: collapsed ? 88 : undefined,
+		height: collapsed ? 88 : "auto",
 		overflow: collapsed ? "hidden" : "visible",
 		padding: collapsed ? 10 : 12,
 		showCollapsedSummary: collapsed,
 		summaryLineClamp: collapsed ? 2 : undefined,
 		toggleButtonSize: 32,
+	};
+}
+
+export function getThreadListStyle() {
+	return {
+		padding: 12,
+		overflow: "auto",
+		display: "flex",
+		flexDirection: "column",
+		gap: 12,
 	};
 }
 

@@ -1,4 +1,5 @@
 import type { DraftComment, ReviewThread } from "../types.ts";
+import { getThreadListStyle } from "../ui.ts";
 import { CommentComposer } from "./CommentComposer.tsx";
 import { CommentThread } from "./CommentThread.tsx";
 import { EmptyState } from "./EmptyState.tsx";
@@ -36,7 +37,7 @@ export function CommentSidebar({
 			<div style={{ padding: "10px 12px", borderBottom: "1px solid #1e293b", fontSize: 12, color: "#94a3b8" }}>
 				{pending ? "Waiting for Pi to complete this round" : "Ready for more feedback"}
 			</div>
-			<div style={{ padding: 12, overflow: "auto", display: "grid", gap: 12 }}>
+			<div style={getThreadListStyle()}>
 				{threads.length === 0 ? (
 					<EmptyState title="No threads for this file" detail="Add a file comment, click the + gutter action for a single-line comment, or drag in the diff to start a range comment." />
 				) : (

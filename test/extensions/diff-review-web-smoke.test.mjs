@@ -15,6 +15,7 @@ import {
 	getSubmitButtonLabel,
 	getTextFieldStyle,
 	getThreadCardLayout,
+	getThreadListStyle,
 	reuseShallowEqualArray,
 } from "../../pi-extension/diff-review/web/src/ui.ts";
 import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
@@ -219,7 +220,7 @@ test("getActiveDiffAnchor falls back to the focused thread anchor and prefers ac
 	}), { path: "src/a.ts", startLine: 8, endLine: 9, targetSide: "new" });
 });
 
-test("getThreadCardLayout makes collapsed cards meaningfully smaller than expanded cards", () => {
+test("getThreadCardLayout keeps expanded cards content-sized while collapsed cards stay compact", () => {
 	const collapsed = getThreadCardLayout(true, false);
 	const expanded = getThreadCardLayout(false, false);
 	assert.ok(collapsed.padding < expanded.padding);
@@ -227,8 +228,17 @@ test("getThreadCardLayout makes collapsed cards meaningfully smaller than expand
 	assert.equal(collapsed.showCollapsedSummary, true);
 	assert.equal(expanded.showCollapsedSummary, false);
 	assert.equal(collapsed.height, 88);
-	assert.equal(expanded.height, undefined);
+	assert.equal(expanded.height, "auto");
 	assert.ok(collapsed.toggleButtonSize > 24);
+});
+
+test("thread list layout packs cards at the top instead of stretching them through the sidebar", () => {
+	const style = getThreadListStyle();
+	assert.equal(style.display, "flex");
+	assert.equal(style.flexDirection, "column");
+	assert.equal(style.overflow, "auto");
+	assert.equal(style.padding, 12);
+	assert.equal(style.gap, 12);
 });
 
 test("shared control styles keep buttons, selects, and text fields on-theme", () => {
