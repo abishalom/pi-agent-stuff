@@ -197,6 +197,42 @@ test("session shutdown closes active diff review sessions for the Pi session key
 	assert.equal(shutdowns, 1);
 });
 
+test("session shutdown during startup closes the late server instead of attaching it", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	const pi = createFakePi();
+	let releaseStartup;
+	let startupEntered;
+	let lateServerClosed = 0;
+	const startupGate = new Promise((resolve) => {
+		releaseStartup = resolve;
+	});
+	const entered = new Promise((resolve) => {
+		startupEntered = resolve;
+	});
+	createDiffReviewExtension({
+		startServer: async () => {
+			startupEntered();
+			await startupGate;
+			return {
+				baseUrl: "http://127.0.0.1:4321",
+				async close() {
+					lateServerClosed += 1;
+				},
+			};
+		},
+	})(pi);
+	const ctx = makeCommandContext({ piSessionKey: "s1", cwd: repo.root });
+
+	const commandPromise = pi.commands.get("diff-review").handler("", ctx);
+	const rejected = assert.rejects(commandPromise, /closed during startup/i);
+	await entered;
+	await pi.events.get("session_shutdown")({}, ctx);
+	releaseStartup();
+	await rejected;
+	assert.equal(lateServerClosed, 1);
+});
+
 test("shutdown cleanup continues past close failures and removes all sessions", async () => {
 	const closed = [];
 	const detached = [];

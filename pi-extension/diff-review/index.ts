@@ -49,15 +49,20 @@ export function createDiffReviewExtension(deps?: {
 								isPiIdle: () => ctx.isIdle(),
 								sendUserMessage: (prompt) => pi.sendUserMessage(prompt),
 							});
+							if (reviewSessionStore.getById(session.reviewSessionId) !== session) {
+								await startedServer.close();
+								throw new Error(`Diff review session ${session.reviewSessionId} was closed during startup`);
+							}
 							reviewSessionStore.attachServer(session.reviewSessionId, startedServer);
 							return startedServer;
 						})();
 						pendingServerStarts.set(session.reviewSessionId, pending);
-						pending.finally(() => {
+						const clearPending = () => {
 							if (pendingServerStarts.get(session.reviewSessionId) === pending) {
 								pendingServerStarts.delete(session.reviewSessionId);
 							}
-						});
+						};
+						pending.then(clearPending, clearPending);
 					}
 					server = await pending;
 				}
