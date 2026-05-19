@@ -95,10 +95,12 @@ export async function startReviewServer(
 		sendUserMessage(prompt: string): Promise<void> | void;
 		readFileImpl?: typeof defaultReadFile;
 		createDiffProvider?: typeof createDiffProvider;
+		beforeSubmit?: () => Promise<void> | void;
 		port?: number;
 	},
 ) {
 	const eventStreams = new Set<import("node:http").ServerResponse>();
+	let submitInFlight = false;
 	const server = createServer(async (req, res) => {
 		try {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -146,17 +148,23 @@ export async function startReviewServer(
 				});
 			}
 			if (req.method === "POST" && url.pathname === "/api/submit") {
-				if (session.pendingSubmission) {
+				if (session.pendingSubmission || submitInFlight) {
 					return json(res, 409, { error: "review submission already pending" });
 				}
 				if (!deps.isPiIdle()) {
 					return json(res, 409, { error: "Pi session is busy" });
 				}
-				const round = await submitReview(session, async (prompt) => {
-					await deps.sendUserMessage(prompt);
-				});
-				deps.store.emitSessionState(session);
-				return json(res, 200, { roundId: round.id, pendingSubmission: session.pendingSubmission });
+				submitInFlight = true;
+				try {
+					await deps.beforeSubmit?.();
+					const round = await submitReview(session, async (prompt) => {
+						await deps.sendUserMessage(prompt);
+					});
+					deps.store.emitSessionState(session);
+					return json(res, 200, { roundId: round.id, pendingSubmission: session.pendingSubmission });
+				} finally {
+					submitInFlight = false;
+				}
 			}
 			const completeMatch = /^\/api\/rounds\/([^/]+)\/complete$/.exec(url.pathname);
 			if (req.method === "POST" && completeMatch) {

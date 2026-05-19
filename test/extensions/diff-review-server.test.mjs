@@ -5,6 +5,7 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { promisify } from "node:util";
 
 import { createReviewSessionStore } from "../../pi-extension/diff-review/state.ts";
@@ -88,20 +89,50 @@ function makeReviewSession(repoRoot) {
 async function startTestServer(repoRoot, overrides = {}) {
 	const { store, session } = makeReviewSession(repoRoot);
 	const sentPrompts = [];
+	const sendUserMessage = overrides.sendUserMessage ?? (async (prompt) => {
+		sentPrompts.push(prompt);
+	});
 	const server = await startReviewServer(session, {
 		store,
 		isPiIdle: overrides.isPiIdle ?? (() => true),
-		sendUserMessage: async (prompt) => {
-			sentPrompts.push(prompt);
-		},
+		sendUserMessage,
 		readFileImpl: overrides.readFileImpl,
 		createDiffProvider: overrides.createDiffProvider,
+		beforeSubmit: overrides.beforeSubmit,
 	});
 	return { ...server, store, session, sentPrompts };
 }
 
 async function getJson(response) {
 	return { status: response.status, body: await response.json() };
+}
+
+async function postJson(url, body = {}) {
+	return new Promise((resolve, reject) => {
+		const target = new URL(url);
+		const req = httpRequest(
+			{
+				hostname: target.hostname,
+				port: target.port,
+				path: `${target.pathname}${target.search}`,
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				agent: false,
+			},
+			(res) => {
+				const chunks = [];
+				res.on("data", (chunk) => chunks.push(chunk));
+				res.on("end", () => {
+					resolve({
+						status: res.statusCode,
+						body: chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null,
+					});
+				});
+			},
+		);
+		req.on("error", reject);
+		req.end(JSON.stringify(body));
+	});
 }
 
 test("server binds to loopback and rejects missing secret", async (t) => {
@@ -128,6 +159,47 @@ test("submit rejects while the Pi session is busy before mutating state", async 
 	});
 	assert.equal(response.status, 409);
 	assert.equal(started.session.pendingSubmission, null);
+});
+
+test("concurrent submit requests do not inject the same round twice", async (t) => {
+	const repo = await createTempRepoFixture();
+	t.after(() => repo.cleanup());
+	let releaseFirstSubmit;
+	let signalFirstSubmitEntered;
+	const firstSubmitBlocked = new Promise((resolve) => {
+		releaseFirstSubmit = resolve;
+	});
+	const firstSubmitEntered = new Promise((resolve) => {
+		signalFirstSubmitEntered = resolve;
+	});
+	let beforeSubmitCalls = 0;
+	const sentPrompts = [];
+	const started = await startTestServer(repo.root, {
+		beforeSubmit: async () => {
+			beforeSubmitCalls += 1;
+			if (beforeSubmitCalls === 1) {
+				signalFirstSubmitEntered();
+				await firstSubmitBlocked;
+			}
+		},
+		sendUserMessage: async (prompt) => {
+			sentPrompts.push(prompt);
+		},
+	});
+	t.after(() => started.close());
+
+	const submitUrl = `${started.baseUrl}/api/submit?secret=${started.session.serverSecret}`;
+	const first = postJson(submitUrl, {});
+	await firstSubmitEntered;
+	const second = postJson(submitUrl, {});
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	releaseFirstSubmit();
+	const [firstResponse, secondResponse] = await Promise.all([first, second]);
+	const statuses = [firstResponse.status, secondResponse.status].sort();
+	assert.deepEqual(statuses, [200, 409]);
+	assert.equal(beforeSubmitCalls, 1);
+	assert.equal(sentPrompts.length, 1);
+	assert.equal(started.session.pendingSubmission?.id, "round-1");
 });
 
 test("completing a Pi round clears pending state and enables another submit", async (t) => {
