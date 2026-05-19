@@ -12,12 +12,17 @@ export function getGutterCommentLabel() {
 	return "+";
 }
 
+function normalizeLineAnchor(path: string, line: LineAnchor | undefined) {
+	if (!line) return null;
+	return { path, ...line };
+}
+
 export function getSelectedDraftAnchor(
 	draft: DraftComment | null | undefined,
 	selectedPath: string | null | undefined,
 ) {
 	if (!draft || draft.path !== selectedPath) return null;
-	return draft.line ?? null;
+	return normalizeLineAnchor(draft.path, draft.line);
 }
 
 export function reuseShallowEqualArray<T>(previous: readonly T[], next: readonly T[]) {
@@ -27,6 +32,44 @@ export function reuseShallowEqualArray<T>(previous: readonly T[], next: readonly
 		if (previous[index] !== next[index]) return next;
 	}
 	return previous;
+}
+
+export function getFocusedThreadAnchor(
+	threads: readonly ReviewThread[],
+	focusedThreadId: string | null | undefined,
+	selectedPath: string | null | undefined,
+) {
+	if (!focusedThreadId) return null;
+	const thread = threads.find((candidate) => candidate.id === focusedThreadId);
+	if (!thread) return null;
+	if (selectedPath && thread.path !== selectedPath) return null;
+	return normalizeLineAnchor(thread.path, thread.root.line);
+}
+
+export function getActiveDiffAnchor({
+	draft,
+	selectedPath,
+	threads,
+	focusedThreadId,
+}: {
+	draft: DraftComment | null | undefined;
+	selectedPath: string | null | undefined;
+	threads: readonly ReviewThread[];
+	focusedThreadId: string | null | undefined;
+}) {
+	return getSelectedDraftAnchor(draft, selectedPath) ?? getFocusedThreadAnchor(threads, focusedThreadId, selectedPath);
+}
+
+export function getThreadCardLayout(collapsed: boolean, isFocused: boolean) {
+	return {
+		background: isFocused ? "#172554" : collapsed ? "#0b1220" : "#111827",
+		borderColor: isFocused ? "#2563eb" : "#1e293b",
+		boxShadow: isFocused ? "0 0 0 1px rgba(37,99,235,0.2)" : undefined,
+		gap: collapsed ? 6 : 10,
+		headerGap: collapsed ? 8 : 10,
+		padding: collapsed ? 10 : 12,
+		showCollapsedSummary: collapsed,
+	};
 }
 
 export function formatAnchor(line?: LineAnchor) {

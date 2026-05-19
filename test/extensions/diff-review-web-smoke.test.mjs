@@ -7,7 +7,13 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { createReviewSessionState } from "../../pi-extension/diff-review/web/src/state/review-session.ts";
-import { getSubmitButtonLabel, getComposerIdleActions, reuseShallowEqualArray } from "../../pi-extension/diff-review/web/src/ui.ts";
+import {
+	getActiveDiffAnchor,
+	getComposerIdleActions,
+	getSubmitButtonLabel,
+	getThreadCardLayout,
+	reuseShallowEqualArray,
+} from "../../pi-extension/diff-review/web/src/ui.ts";
 import { selectionRangeToAnchor } from "../../pi-extension/diff-review/web/src/adapters/pierre-diffs.ts";
 
 const execFileAsync = promisify(execFile);
@@ -192,6 +198,31 @@ test("reuseShallowEqualArray preserves selected thread identity across unrelated
 	assert.equal(reuseShallowEqualArray(previous, next), previous);
 	const expanded = [...next, next[0]];
 	assert.equal(reuseShallowEqualArray(previous, expanded), expanded);
+});
+
+test("getActiveDiffAnchor falls back to the focused thread anchor and prefers active draft selections", () => {
+	const payload = makeBootstrapPayload();
+	assert.deepEqual(getActiveDiffAnchor({
+		draft: null,
+		selectedPath: "src/a.ts",
+		threads: payload.threads,
+		focusedThreadId: "thread-1",
+	}), { path: "src/a.ts", startLine: 4, endLine: 4, targetSide: "new" });
+	assert.deepEqual(getActiveDiffAnchor({
+		draft: { id: "draft-1", kind: "thread", path: "src/a.ts", line: { path: "src/a.ts", startLine: 8, endLine: 9, targetSide: "new" }, text: "draft" },
+		selectedPath: "src/a.ts",
+		threads: payload.threads,
+		focusedThreadId: "thread-1",
+	}), { path: "src/a.ts", startLine: 8, endLine: 9, targetSide: "new" });
+});
+
+test("getThreadCardLayout makes collapsed cards meaningfully smaller than expanded cards", () => {
+	const collapsed = getThreadCardLayout(true, false);
+	const expanded = getThreadCardLayout(false, false);
+	assert.ok(collapsed.padding < expanded.padding);
+	assert.ok(collapsed.gap < expanded.gap);
+	assert.equal(collapsed.showCollapsedSummary, true);
+	assert.equal(expanded.showCollapsedSummary, false);
 });
 
 test("syncPierreTreeModel mutates the Pierre tree model instead of relying on remount keys", async () => {

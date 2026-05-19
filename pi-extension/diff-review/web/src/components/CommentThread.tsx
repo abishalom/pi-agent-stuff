@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DraftComment, ReviewThread } from "../types.ts";
-import { buildThreadTimeline, formatAnchor, formatDraftLabel } from "../ui.ts";
+import { buildThreadTimeline, formatAnchor, formatDraftLabel, getThreadCardLayout } from "../ui.ts";
 
 function truncate(text: string, maxLength = 72) {
 	return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
@@ -11,6 +11,7 @@ export function CommentThread({
 	isFocused,
 	collapsed,
 	replyDraft,
+	onFocusThread,
 	onToggleCollapsed,
 	onStartReply,
 	onReplyChange,
@@ -21,6 +22,7 @@ export function CommentThread({
 	isFocused: boolean;
 	collapsed: boolean;
 	replyDraft: DraftComment | null;
+	onFocusThread(): void;
 	onToggleCollapsed(): void;
 	onStartReply(): void;
 	onReplyChange(text: string): void;
@@ -30,7 +32,9 @@ export function CommentThread({
 	const timeline = buildThreadTimeline(thread);
 	const anchor = formatAnchor(thread.root.line);
 	const summary = truncate(thread.root.body.replace(/\s+/g, " "));
+	const replyCount = timeline.length - 1;
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const layout = getThreadCardLayout(collapsed, isFocused);
 
 	useEffect(() => {
 		if (!isFocused) return;
@@ -40,29 +44,71 @@ export function CommentThread({
 	return (
 		<div
 			ref={containerRef}
+			role="button"
+			tabIndex={0}
+			aria-pressed={isFocused}
+			onClick={onFocusThread}
+			onKeyDown={(event) => {
+				if (event.key !== "Enter" && event.key !== " ") return;
+				event.preventDefault();
+				onFocusThread();
+			}}
 			style={{
-				border: isFocused ? "1px solid #2563eb" : "1px solid #1e293b",
+				border: `1px solid ${layout.borderColor}`,
 				borderRadius: 10,
-				padding: 12,
+				padding: layout.padding,
 				display: "grid",
-				gap: 10,
-				background: isFocused ? "#172554" : "#111827",
-				boxShadow: isFocused ? "0 0 0 1px rgba(37,99,235,0.2)" : undefined,
+				gap: layout.gap,
+				background: layout.background,
+				boxShadow: layout.boxShadow,
+				cursor: "pointer",
 			}}
 		>
-			<div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "start", gap: 10 }}>
-				<button onClick={onToggleCollapsed} aria-label={collapsed ? "Expand thread" : "Collapse thread"} style={{ width: 24, height: 24 }}>
+			<div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: collapsed ? "center" : "start", gap: layout.headerGap }}>
+				<button
+					onClick={(event) => {
+						event.stopPropagation();
+						onToggleCollapsed();
+					}}
+					aria-label={collapsed ? "Expand thread" : "Collapse thread"}
+					style={{ width: 24, height: 24 }}
+				>
 					{collapsed ? "+" : "-"}
 				</button>
-				<div style={{ minWidth: 0 }}>
+				<div style={{ minWidth: 0, display: "grid", gap: collapsed ? 4 : 6 }}>
 					<div style={{ fontSize: 12, color: "#94a3b8" }}>{thread.path}{anchor ? `:${anchor}` : ""}</div>
-					{collapsed ? <div style={{ color: "#e2e8f0" }}>{summary}</div> : null}
+					{layout.showCollapsedSummary ? (
+						<div style={{ color: "#e2e8f0", fontSize: 13, lineHeight: 1.35 }}>{summary}</div>
+					) : null}
 				</div>
-				{!replyDraft ? <button onClick={onStartReply}>Reply</button> : <button onClick={onCancelReply}>Cancel</button>}
+				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					{collapsed ? (
+						<span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+							{replyCount} repl{replyCount === 1 ? "y" : "ies"}
+						</span>
+					) : null}
+					{!replyDraft ? (
+						<button
+							onClick={(event) => {
+								event.stopPropagation();
+								onStartReply();
+							}}
+						>
+							Reply
+						</button>
+					) : (
+						<button
+							onClick={(event) => {
+								event.stopPropagation();
+								onCancelReply();
+							}}
+						>
+							Cancel
+						</button>
+					)}
+				</div>
 			</div>
-			{collapsed ? (
-				<div style={{ fontSize: 12, color: "#64748b" }}>{timeline.length - 1} repl{timeline.length - 1 === 1 ? "y" : "ies"}</div>
-			) : (
+			{collapsed ? null : (
 				<>
 					<div style={{ display: "grid", gap: 8 }}>
 						{timeline.map((entry) => (
@@ -76,7 +122,7 @@ export function CommentThread({
 						))}
 					</div>
 					{replyDraft?.kind === "reply" ? (
-						<div style={{ display: "grid", gap: 8, paddingTop: 4 }}>
+						<div style={{ display: "grid", gap: 8, paddingTop: 4 }} onClick={(event) => event.stopPropagation()}>
 							<div style={{ fontSize: 12, color: "#94a3b8" }}>{formatDraftLabel(replyDraft)}</div>
 							<textarea rows={3} value={replyDraft.text} onChange={(event) => onReplyChange(event.target.value)} />
 							<button onClick={onSaveReply} disabled={!replyDraft.text.trim()}>Add reply</button>

@@ -8,7 +8,7 @@ import { RepoTreePanel } from "./components/RepoTreePanel.tsx";
 import { ReviewLayout } from "./components/ReviewLayout.tsx";
 import { createReviewSessionState } from "./state/review-session.ts";
 import type { BootstrapPayload, DiffFileDetail } from "./types.ts";
-import { getSelectedDraftAnchor, reuseShallowEqualArray } from "./ui.ts";
+import { getActiveDiffAnchor, reuseShallowEqualArray } from "./ui.ts";
 
 export function App() {
 	const [sessionState, setSessionState] = useState<ReturnType<typeof createReviewSessionState> | null>(null);
@@ -81,7 +81,12 @@ export function App() {
 	const nextSelectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
 	const selectedThreads = reuseShallowEqualArray(selectedThreadsRef.current, nextSelectedThreads);
 	selectedThreadsRef.current = selectedThreads;
-	const selectedAnchor = getSelectedDraftAnchor(sessionState?.draft, sessionState?.selectedPath);
+	const selectedAnchor = getActiveDiffAnchor({
+		draft: sessionState?.draft,
+		selectedPath: sessionState?.selectedPath,
+		threads: sessionState?.threads ?? [],
+		focusedThreadId: sessionState?.focusedThreadId,
+	});
 	const handleSelectPath = useCallback((path: string) => sessionState?.selectPath(path), [sessionState]);
 	const handleSelectAnchor = useCallback((anchor: import("./types.ts").LineAnchor | null) => {
 		if (anchor) {
@@ -173,6 +178,7 @@ export function App() {
 				focusedThreadId={sessionState.focusedThreadId}
 				draft={sessionState.draft}
 				pending={Boolean(sessionState.pendingSubmission)}
+				onFocusThread={handleFocusThread}
 				onStartFileComment={() => {
 					const path = sessionState.selectedPath ?? sessionState.paths[0] ?? "";
 					if (!path) return;

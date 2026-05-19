@@ -8,6 +8,7 @@ export function CommentSidebar({
 	focusedThreadId,
 	draft,
 	pending,
+	onFocusThread,
 	onStartFileComment,
 	onDraftChange,
 	onSaveDraft,
@@ -20,6 +21,7 @@ export function CommentSidebar({
 	focusedThreadId: string | null;
 	draft: DraftComment | null;
 	pending: boolean;
+	onFocusThread(threadId: string): void;
 	onStartFileComment(): void;
 	onDraftChange(text: string): void;
 	onSaveDraft(): void;
@@ -47,6 +49,7 @@ export function CommentSidebar({
 								isFocused={focusedThreadId === thread.id}
 								collapsed={isThreadCollapsed(thread.id)}
 								replyDraft={replyDraft}
+								onFocusThread={() => onFocusThread(thread.id)}
 								onToggleCollapsed={() => onToggleThreadCollapsed(thread.id)}
 								onStartReply={() => onStartReply(thread.id)}
 								onReplyChange={onDraftChange}
