@@ -6,6 +6,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 
 ### Local resources from this repo
 - `pi-extension/answer` — local `/answer` replacement with repo-managed config and upstream-matching UX
+- `pi-extension/diff-review` — local `/diff-review` replacement with a browser-based review UI
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/subagent-model-overrides` — apply local model/thinking policy to subagents
@@ -104,6 +105,20 @@ Otherwise the same extensions may load twice.
 Subagent behavior comes from upstream `pi-interactive-subagents`. This repo only controls model and thinking defaults through:
 
 - `config/subagent-model-overrides.json`
+
+### `/diff-review`
+
+`/diff-review` opens a local browser review session for the current repo.
+
+Key behavior:
+- loopback-only URL on `127.0.0.1` with a per-review secret in the query string
+- session-scoped review state that is ephemeral and kept in memory
+- same-session + same-repo reuse; changing repos creates a different review session
+- working tree vs `HEAD` as the default comparison, with merge-base fallback surfaced in the UI when available mode selection falls back
+
+Frontend build workflow:
+- `npm run build:diff-review-web` — rebuild committed static assets in `pi-extension/diff-review/static/`
+- `npm run verify:diff-review-web` — rebuild into a temp directory and fail if committed static assets are stale
 
 ### `/answer` config
 

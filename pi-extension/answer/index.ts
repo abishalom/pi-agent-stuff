@@ -1,6 +1,7 @@
-import { completeSimple, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { BorderedLoader } from "@mariozechner/pi-coding-agent";
+import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { completeSimple } from "../lib/pi-ai-compat.ts";
+import { BorderedLoader } from "../lib/pi-coding-agent-compat.ts";
 import { loadAnswerConfig } from "./config.ts";
 import { selectExtractionModel } from "./model-selection.ts";
 import { selectSourceText } from "./source-selection.ts";

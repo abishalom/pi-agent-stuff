@@ -17,7 +17,7 @@
       "./node_modules/mitsupi/extensions/files.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
-      "./node_modules/pi-diff-review/src/index.ts",
+      "./pi-extension/diff-review/index.ts",
       "./pi-extension/subagent-model-overrides/index.ts"
     ],
     "skills": [
@@ -29,17 +29,30 @@
     ]
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build:diff-review-web": "node ./pi-extension/diff-review/web/build-static.mjs",
+    "verify:diff-review-web": "node ./pi-extension/diff-review/web/verify-static.mjs"
   },
   "dependencies": {
+    "@pierre/diffs": "^1.1.22",
+    "@pierre/trees": "^1.0.0-beta.3",
     "glimpseui": "^0.6.2",
     "mitsupi": "^1.6.0",
-    "pi-diff-review": "github:badlogic/pi-diff-review",
-    "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents"
+    "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
   }
 }
