@@ -46,6 +46,11 @@ test("package manifest loads local answer extension instead of upstream answer.t
 	assert.ok(!packageJson.pi.extensions.includes("./node_modules/mitsupi/extensions/answer.ts"));
 });
 
+test("package manifest references only current pi-interactive-subagents extension entrypoints", () => {
+	assert.ok(packageJson.pi.extensions.includes("./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts"));
+	assert.ok(!packageJson.pi.extensions.includes("./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts"));
+});
+
 test("extension registers one /answer command and ctrl+. shortcut", () => {
 	const pi = createFakePi();
 	answerExtension(pi);
