@@ -247,11 +247,15 @@ function formatReport(theme: Theme, stats: Map<string, FileStats>, width: number
 }
 
 class ChangedFilesReportOverlay {
-	constructor(
-		private theme: Theme,
-		private stats: Map<string, FileStats>,
-		private done: () => void,
-	) {}
+	private theme: Theme;
+	private stats: Map<string, FileStats>;
+	private done: () => void;
+
+	constructor(theme: Theme, stats: Map<string, FileStats>, done: () => void) {
+		this.theme = theme;
+		this.stats = stats;
+		this.done = done;
+	}
 
 	handleInput(data: string): void {
 		if (matchesKey(data, "escape") || matchesKey(data, "return") || matchesKey(data, "ctrl+c")) {
@@ -324,12 +328,6 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		reconstructState(ctx);
 	});
-	pi.on("session_switch", async (_event, ctx) => {
-		reconstructState(ctx);
-	});
-	pi.on("session_fork", async (_event, ctx) => {
-		reconstructState(ctx);
-	});
 	pi.on("session_tree", async (_event, ctx) => {
 		reconstructState(ctx);
 	});
@@ -358,6 +356,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.toolName === "edit") {
+			if (event.isError) return;
 			const input = event.input as { path?: string };
 			if (typeof input.path !== "string") return;
 			const details = (event.details ?? {}) as PersistedToolDetails;
@@ -381,6 +380,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 		if (event.toolName === "write") {
 			const snapshot = pendingWrites.get(event.toolCallId);
 			pendingWrites.delete(event.toolCallId);
+			if (event.isError) return;
 			const input = event.input as { content?: string };
 			if (!snapshot || typeof input.content !== "string") return;
 			const counts = countDiffBetweenContents(snapshot.before, input.content);
