@@ -113,6 +113,21 @@ test("frontend review-session state prefers closed/error banner over merge-base 
 	assert.match(state.getBannerMessage() ?? "", /session ended/i);
 });
 
+test("frontend review-session state can refresh changed-tree data after diff-mode changes", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	state.setShowChangedOnly(true);
+	assert.equal(typeof state.applyTree, "function");
+	if (typeof state.applyTree !== "function") return;
+	state.applyTree({
+		paths: ["README.md", "src/a.ts", "src/b.ts"],
+		changedPaths: ["src/b.ts"],
+		changedFiles: [{ path: "src/b.ts", status: "modified" }],
+	});
+	assert.deepEqual(state.getVisiblePaths(), ["src/b.ts"]);
+	assert.deepEqual(state.changedFiles, [{ path: "src/b.ts", status: "modified" }]);
+	assert.equal(state.selectedPath, "src/b.ts");
+});
+
 test("verify:diff-review-web fails when committed static assets drift", async () => {
 	await assert.rejects(() => runVerifyWithDirtyStaticFixture(), /static assets are stale/i);
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { connectEvents, fetchFile, fetchSession, setDiffMode, submitReview } from "./api.ts";
+import { connectEvents, fetchFile, fetchSession, fetchTree, setDiffMode, submitReview } from "./api.ts";
 import { DiffToolbar } from "./components/DiffToolbar.tsx";
 import { DiffViewer } from "./components/DiffViewer.tsx";
 import { FilterBar } from "./components/FilterBar.tsx";
@@ -93,12 +93,17 @@ export function App() {
 					onChangeMode={async (mode) => {
 						try {
 							const modeState = await setDiffMode(mode);
+							const tree = await fetchTree();
 							sessionState.diffMode = mode;
 							sessionState.requestedMode = modeState.requestedMode;
 							sessionState.effectiveMode = modeState.effectiveMode;
 							sessionState.mergeBaseWarning = modeState.warning ?? null;
-							sessionState.emit();
-							if (sessionState.selectedPath) setFileDetail(await fetchFile(sessionState.selectedPath));
+							sessionState.applyTree(tree);
+							if (sessionState.selectedPath) {
+								setFileDetail(await fetchFile(sessionState.selectedPath));
+							} else {
+								setFileDetail(null);
+							}
 						} catch (error) {
 							sessionState.applyConnectionError(error instanceof Error ? error.message : String(error));
 						}

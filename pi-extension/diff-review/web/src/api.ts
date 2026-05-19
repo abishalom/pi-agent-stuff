@@ -2,6 +2,7 @@ import type {
 	BootstrapPayload,
 	DiffFileDetail,
 	DiffMode,
+	DiffTree,
 	ReviewReply,
 	SessionClosedEvent,
 	SessionStateEvent,
@@ -31,6 +32,10 @@ export function fetchFile(path: string) {
 	url.searchParams.set("secret", getSecret());
 	url.searchParams.set("path", path);
 	return requestJson<DiffFileDetail>(url.pathname + url.search);
+}
+
+export function fetchTree() {
+	return requestJson<DiffTree>("/api/tree");
 }
 
 export function setDiffMode(requestedMode: DiffMode) {

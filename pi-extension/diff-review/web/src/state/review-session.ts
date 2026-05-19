@@ -94,16 +94,25 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.pendingSubmission = next.pendingSubmission;
 			state.submissionHistory = [...next.submissionHistory];
 			state.files = [...next.files];
-			state.paths = [...next.paths];
-			state.changedPaths = [...next.changedPaths];
-			state.changedFiles = [...next.changedFiles];
+			state.applyTree(next, { emit: false, fallbackPath: next.files[0]?.path ?? null });
 			state.threads = cloneThreads(next.threads);
-			if (!state.selectedPath || !state.paths.includes(state.selectedPath)) {
-				state.selectedPath = next.changedPaths[0] ?? next.paths[0] ?? next.files[0]?.path ?? null;
-			}
 			state.connectionState = "open";
 			state.errorMessage = null;
 			state.emit();
+		},
+		applyTree(next: Pick<BootstrapPayload, "paths" | "changedPaths" | "changedFiles">, options?: { emit?: boolean; fallbackPath?: string | null }) {
+			state.paths = [...next.paths];
+			state.changedPaths = [...next.changedPaths];
+			state.changedFiles = [...next.changedFiles];
+			const mustReselect = !state.selectedPath
+				|| !state.paths.includes(state.selectedPath)
+				|| (state.showChangedOnly && !state.changedPaths.includes(state.selectedPath));
+			if (mustReselect) {
+				state.selectedPath = state.changedPaths[0] ?? state.paths[0] ?? options?.fallbackPath ?? null;
+			}
+			if (options?.emit !== false) {
+				state.emit();
+			}
 		},
 		applySessionState(event: SessionStateEvent) {
 			state.diffMode = event.diffMode;
