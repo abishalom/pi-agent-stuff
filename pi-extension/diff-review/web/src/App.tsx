@@ -8,6 +8,7 @@ import { RepoTreePanel } from "./components/RepoTreePanel.tsx";
 import { ReviewLayout } from "./components/ReviewLayout.tsx";
 import { createReviewSessionState } from "./state/review-session.ts";
 import type { BootstrapPayload, DiffFileDetail } from "./types.ts";
+import { getSelectedDraftAnchor } from "./ui.ts";
 
 export function App() {
 	const [sessionState, setSessionState] = useState<ReturnType<typeof createReviewSessionState> | null>(null);
@@ -74,7 +75,7 @@ export function App() {
 
 	const visiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
 	const selectedThreads = sessionState?.getThreadsForSelectedPath() ?? [];
-	const selectedAnchor = sessionState?.draft?.path === sessionState?.selectedPath ? sessionState.draft.line ?? null : null;
+	const selectedAnchor = getSelectedDraftAnchor(sessionState?.draft, sessionState?.selectedPath);
 
 	function handleStateError(error: unknown) {
 		sessionState?.applyConnectionError(error instanceof Error ? error.message : String(error));

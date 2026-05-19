@@ -12,6 +12,14 @@ export function getGutterCommentLabel() {
 	return "+";
 }
 
+export function getSelectedDraftAnchor(
+	draft: DraftComment | null | undefined,
+	selectedPath: string | null | undefined,
+) {
+	if (!draft || draft.path !== selectedPath) return null;
+	return draft.line ?? null;
+}
+
 export function formatAnchor(line?: LineAnchor) {
 	if (!line) return null;
 	if (line.startLine === line.endLine) {

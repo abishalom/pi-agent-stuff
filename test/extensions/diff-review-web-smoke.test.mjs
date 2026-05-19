@@ -265,6 +265,12 @@ test("buildDiffLineAnnotations groups anchored threads by side and line", async 
 });
 
 
+test("getSelectedDraftAnchor returns null before session bootstrap completes", async () => {
+	const { getSelectedDraftAnchor } = await importWebModule("../../pi-extension/diff-review/web/src/ui.ts");
+	assert.equal(typeof getSelectedDraftAnchor, "function");
+	assert.equal(getSelectedDraftAnchor(null, undefined), null);
+});
+
 test("diff toolbar uses the Submit feedback CTA label", () => {
 	assert.equal(getSubmitButtonLabel(false), "Submit feedback");
 	assert.equal(getSubmitButtonLabel(true), "Waiting for Pi…");
