@@ -136,6 +136,10 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.emit();
 		},
 		applyConnectionError(message: string) {
+			if (state.connectionState === "closed") {
+				state.emit();
+				return;
+			}
 			state.connectionState = "error";
 			state.errorMessage = message;
 			state.emit();
@@ -144,6 +148,9 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.connectionState = "closed";
 			state.errorMessage = event.message ?? "This diff review session has ended. Reload to reconnect.";
 			state.emit();
+		},
+		getBannerMessage() {
+			return state.errorMessage ?? state.mergeBaseWarning;
 		},
 		getVisiblePaths() {
 			return state.showChangedOnly ? [...state.changedPaths] : [...state.paths];

@@ -83,7 +83,7 @@ export function App() {
 	return (
 		<ReviewLayout
 			left={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>
-				<FilterBar showChangedOnly={sessionState.showChangedOnly} onToggle={() => sessionState.setShowChangedOnly(!sessionState.showChangedOnly)} warning={sessionState.mergeBaseWarning ?? sessionState.errorMessage} />
+				<FilterBar showChangedOnly={sessionState.showChangedOnly} onToggle={() => sessionState.setShowChangedOnly(!sessionState.showChangedOnly)} warning={sessionState.getBannerMessage()} />
 				<RepoTreePanel paths={visiblePaths} changedFiles={sessionState.changedFiles} selectedPath={sessionState.selectedPath} onSelect={(path) => sessionState.selectPath(path)} />
 			</div>}
 			center={<div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100%" }}>

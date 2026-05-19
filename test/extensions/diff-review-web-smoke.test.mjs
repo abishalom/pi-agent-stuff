@@ -98,11 +98,19 @@ test("frontend review-session state supports bootstrap, file select, draft comme
 	assert.equal(state.threads[0].replies.at(-1)?.reply, "Looks good");
 });
 
-test("frontend review-session state surfaces stale-tab session-closed state", () => {
+test("frontend review-session state preserves session-closed message across later reconnect errors", () => {
 	const state = createReviewSessionState(makeBootstrapPayload());
 	state.applySessionClosed(makeSessionClosedEvent("session ended"));
+	state.applyConnectionError("Connection lost. Attempting to reconnect…");
 	assert.equal(state.connectionState, "closed");
 	assert.match(state.errorMessage ?? "", /session ended/i);
+});
+
+test("frontend review-session state prefers closed/error banner over merge-base warning", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	assert.match(state.getBannerMessage() ?? "", /merge-base/i);
+	state.applySessionClosed(makeSessionClosedEvent("session ended"));
+	assert.match(state.getBannerMessage() ?? "", /session ended/i);
 });
 
 test("verify:diff-review-web fails when committed static assets drift", async () => {
