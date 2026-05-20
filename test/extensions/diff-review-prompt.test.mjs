@@ -62,6 +62,8 @@ test("prompt synthesis includes the full submit contract and requires tool-call 
 	assert.match(prompt, /must call the diff_review_reply tool/i);
 	assert.match(prompt, /must call the diff_review_complete tool even if you send zero replies/i);
 	assert.match(prompt, /reply to any subset of threads, including none/i);
+	assert.match(prompt, /if the user requests a code change, you may inspect and edit the repo to make that change before replying/i);
+	assert.match(prompt, /if you make code changes, say what you changed in the relevant diff_review_reply tool call/i);
 	assert.match(prompt, /do not reply only with freeform chat text/i);
 });
 

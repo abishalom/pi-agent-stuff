@@ -65,6 +65,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			for (const listener of listeners) listener();
 		},
 		selectPath(path: string) {
+			if (state.selectedPath === path && state.focusedThreadId === null) return;
 			state.selectedPath = path;
 			state.focusedThreadId = null;
 			state.emit();
@@ -238,7 +239,7 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			return state.errorMessage ?? state.mergeBaseWarning;
 		},
 		getVisiblePaths() {
-			return state.showChangedOnly ? [...state.changedPaths] : [...state.paths];
+			return state.showChangedOnly ? state.changedPaths : state.paths;
 		},
 		getThreadsForSelectedPath() {
 			if (!state.selectedPath) return [];

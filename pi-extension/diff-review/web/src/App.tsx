@@ -19,7 +19,6 @@ export function App() {
 	const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 	const [threadSortMode, setThreadSortMode] = useState<ThreadSortMode>("line-number-asc");
 	const [, rerender] = useState(0);
-	const visiblePathsRef = useRef<BootstrapPayload["paths"]>([]);
 	const selectedThreadsRef = useRef<BootstrapPayload["threads"]>([]);
 
 	useEffect(() => {
@@ -77,9 +76,7 @@ export function App() {
 		};
 	}, [sessionState?.selectedPath]);
 
-	const nextVisiblePaths = useMemo(() => sessionState?.getVisiblePaths() ?? [], [sessionState, sessionState?.showChangedOnly, sessionState?.paths, sessionState?.changedPaths]);
-	const visiblePaths = reuseShallowEqualArray(visiblePathsRef.current, nextVisiblePaths);
-	visiblePathsRef.current = visiblePaths;
+	const visiblePaths = sessionState?.getVisiblePaths() ?? [];
 	const nextSelectedThreads = useMemo(
 		() => sortThreads(sessionState?.getThreadsForSelectedPath() ?? [], threadSortMode),
 		[sessionState, sessionState?.selectedPath, sessionState?.threads, threadSortMode],

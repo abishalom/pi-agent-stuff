@@ -13,23 +13,28 @@ export function prepareTreeInput(paths: string[]): FileTreePreparedInput {
 	return prepareFileTreeInput(paths);
 }
 
-export function syncPierreTreeModel(
+export function syncPierreTreeSelection(
 	model: {
-		resetPaths(paths: readonly string[], options?: { preparedInput?: FileTreePreparedInput }): void;
-		setGitStatus(entries?: readonly GitStatusEntry[]): void;
-		focusPath(path: string): void;
-		getItem(path: string): { select(): void } | null;
+		getSelectedPaths(): readonly string[];
+		getItem(path: string): { deselect(): void; isSelected(): boolean; select(): void } | null;
 	},
-	args: {
-		paths: string[];
-		changedFiles: DiffTreeEntry[];
-		selectedPath: string | null;
-		preparedInput: FileTreePreparedInput;
-	},
+	selectedPath: string | null,
 ) {
-	model.resetPaths(args.paths, { preparedInput: args.preparedInput });
-	model.setGitStatus(toPierreGitStatus(args.changedFiles));
-	if (!args.selectedPath) return;
-	model.focusPath(args.selectedPath);
-	model.getItem(args.selectedPath)?.select();
+	const currentSelectedPaths = [...model.getSelectedPaths()];
+	if (!selectedPath) {
+		for (const path of currentSelectedPaths) {
+			model.getItem(path)?.deselect();
+		}
+		return;
+	}
+	if (currentSelectedPaths.length === 1 && currentSelectedPaths[0] === selectedPath) {
+		return;
+	}
+	for (const path of currentSelectedPaths) {
+		if (path === selectedPath) continue;
+		model.getItem(path)?.deselect();
+	}
+	const selectedItem = model.getItem(selectedPath);
+	if (!selectedItem || selectedItem.isSelected()) return;
+	selectedItem.select();
 }

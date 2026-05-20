@@ -72,6 +72,8 @@ export function buildReviewPrompt(
 		threadLines,
 		"Reply instructions:",
 		"- You may reply to any subset of threads, including none.",
+		"- If the user requests a code change, you may inspect and edit the repo to make that change before replying.",
+		"- If you make code changes, say what you changed in the relevant diff_review_reply tool call.",
 		"- You must call the diff_review_reply tool for every reply.",
 		"- You must call the diff_review_complete tool even if you send zero replies.",
 		"- Do not reply only with freeform chat text.",

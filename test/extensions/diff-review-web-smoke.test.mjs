@@ -201,10 +201,47 @@ test("frontend review-session state can focus a thread and sync the selected fil
 	assert.equal(state.selectedPath, "src/a.ts");
 });
 
+test("frontend review-session state ignores redundant same-path selection but still clears thread focus", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	let emits = 0;
+	state.subscribe(() => {
+		emits += 1;
+	});
+	state.selectPath("src/a.ts");
+	assert.equal(emits, 0);
+	state.focusThread("thread-1");
+	assert.equal(state.focusedThreadId, "thread-1");
+	state.selectPath("src/a.ts");
+	assert.equal(state.focusedThreadId, null);
+	assert.equal(emits, 2);
+});
+
 test("frontend review-session state defaults to showing changed files in the tree", () => {
 	const state = createReviewSessionState(makeBootstrapPayload());
 	assert.equal(state.showChangedOnly, true);
 	assert.deepEqual(state.getVisiblePaths(), ["src/a.ts"]);
+});
+
+test("frontend review-session state keeps visible path array identity stable until the visible tree actually changes", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	const changedOnlyPaths = state.getVisiblePaths();
+	assert.equal(state.getVisiblePaths(), changedOnlyPaths);
+	state.selectPath("src/a.ts");
+	assert.equal(state.getVisiblePaths(), changedOnlyPaths);
+	state.setShowChangedOnly(false);
+	const fullTreePaths = state.getVisiblePaths();
+	assert.notEqual(fullTreePaths, changedOnlyPaths);
+	assert.equal(state.getVisiblePaths(), fullTreePaths);
+	state.applyTree({
+		paths: ["README.md", "src/a.ts", "src/c.ts"],
+		changedPaths: ["src/c.ts"],
+		changedFiles: [{ path: "src/c.ts", status: "modified" }],
+	});
+	const refreshedFullTreePaths = state.getVisiblePaths();
+	assert.notEqual(refreshedFullTreePaths, fullTreePaths);
+	assert.equal(state.getVisiblePaths(), refreshedFullTreePaths);
+	state.setShowChangedOnly(true);
+	assert.deepEqual(state.getVisiblePaths(), ["src/c.ts"]);
 });
 
 test("reuseShallowEqualArray preserves selected thread identity across unrelated draft edits", () => {
@@ -344,55 +381,61 @@ test("shared control styles keep buttons, selects, and text fields on-theme", ()
 	assert.equal(textarea.color, "#e2e8f0");
 });
 
-test("syncPierreTreeModel mutates the Pierre tree model instead of relying on remount keys", async () => {
-	const { syncPierreTreeModel } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+test("syncPierreTreeSelection keeps the public Pierre selection single-select without resetting the tree", async () => {
+	const { syncPierreTreeSelection } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+	const selectedPaths = new Set(["README.md", "src/a.ts"]);
 	const calls = [];
 	const model = {
-		resetPaths(paths, options) {
-			calls.push(["resetPaths", [...paths], options]);
-		},
-		setGitStatus(entries) {
-			calls.push(["setGitStatus", entries]);
-		},
-		focusPath(pathname) {
-			calls.push(["focusPath", pathname]);
+		getSelectedPaths() {
+			calls.push(["getSelectedPaths"]);
+			return [...selectedPaths];
 		},
 		getItem(pathname) {
 			calls.push(["getItem", pathname]);
-			return { select() { calls.push(["select", pathname]); } };
+			return {
+				deselect() {
+					calls.push(["deselect", pathname]);
+					selectedPaths.delete(pathname);
+				},
+				isSelected() {
+					calls.push(["isSelected", pathname]);
+					return selectedPaths.has(pathname);
+				},
+				select() {
+					calls.push(["select", pathname]);
+					selectedPaths.add(pathname);
+				},
+			};
 		},
 	};
 
-	syncPierreTreeModel(model, {
-		paths: ["README.md", "src/a.ts"],
-		changedFiles: [{ path: "src/a.ts", status: "modified" }],
-		selectedPath: "src/a.ts",
-		preparedInput: { fake: true },
-	});
+	syncPierreTreeSelection(model, "src/b.ts");
 
+	assert.deepEqual([...selectedPaths].sort(), ["src/b.ts"]);
 	assert.deepEqual(calls.map(([name]) => name), [
-		"resetPaths",
-		"setGitStatus",
-		"focusPath",
+		"getSelectedPaths",
 		"getItem",
+		"deselect",
+		"getItem",
+		"deselect",
+		"getItem",
+		"isSelected",
 		"select",
 	]);
 });
 
 test("prepareTreeInput stays compatible with FileTree resetPaths for unsorted path lists", async () => {
 	const { FileTree } = await import("@pierre/trees");
-	const { prepareTreeInput, syncPierreTreeModel } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
+	const { prepareTreeInput, syncPierreTreeSelection, toPierreGitStatus } = await importWebModule("../../pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts");
 	const paths = ["src/b.ts", "README.md", "src/a.ts"];
 	const preparedInput = prepareTreeInput(paths);
-	const model = new FileTree({ preparedInput, initialExpansion: "open" });
+	const model = new FileTree({ preparedInput, initialExpansion: "open", initialSelectedPaths: ["src/b.ts"] });
 	assert.doesNotThrow(() => {
-		syncPierreTreeModel(model, {
-			paths,
-			changedFiles: [{ path: "src/a.ts", status: "modified" }],
-			selectedPath: "src/a.ts",
-			preparedInput,
-		});
+		model.resetPaths(paths, { preparedInput });
+		model.setGitStatus(toPierreGitStatus([{ path: "src/a.ts", status: "modified" }]));
+		syncPierreTreeSelection(model, "src/a.ts");
 	});
+	assert.deepEqual(model.getSelectedPaths(), ["src/a.ts"]);
 });
 
 test("toPierreGitStatus maps binary entries to modified for Pierre git-status rendering", async () => {

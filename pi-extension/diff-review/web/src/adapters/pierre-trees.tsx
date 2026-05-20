@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import type { DiffTreeEntry } from "../types.ts";
-import { prepareTreeInput, syncPierreTreeModel, toPierreGitStatus } from "./pierre-tree-model.ts";
+import { prepareTreeInput, syncPierreTreeSelection, toPierreGitStatus } from "./pierre-tree-model.ts";
 
 export function PierreRepoTree({
 	paths,
@@ -16,6 +16,8 @@ export function PierreRepoTree({
 }) {
 	const preparedInput = useMemo(() => prepareTreeInput(paths), [paths]);
 	const gitStatus = useMemo(() => toPierreGitStatus(changedFiles), [changedFiles]);
+	const previousPathsRef = useRef<readonly string[]>(paths);
+	const suppressSelectionChangeRef = useRef(false);
 	const { model } = useFileTree({
 		preparedInput,
 		search: false,
@@ -23,14 +25,35 @@ export function PierreRepoTree({
 		initialSelectedPaths: selectedPath ? [selectedPath] : [],
 		gitStatus,
 		onSelectionChange(selectedPaths) {
-			const next = selectedPaths[0];
+			if (suppressSelectionChangeRef.current) return;
+			const next = selectedPaths.find((path) => !path.endsWith("/"));
 			if (next) onSelect(next);
 		},
 	});
 
 	useEffect(() => {
-		syncPierreTreeModel(model, { paths, changedFiles, selectedPath, preparedInput });
-	}, [model, paths, changedFiles, selectedPath, preparedInput]);
+		if (previousPathsRef.current === paths) return;
+		previousPathsRef.current = paths;
+		suppressSelectionChangeRef.current = true;
+		try {
+			model.resetPaths(paths, { preparedInput });
+		} finally {
+			suppressSelectionChangeRef.current = false;
+		}
+	}, [model, paths, preparedInput]);
+
+	useEffect(() => {
+		model.setGitStatus(gitStatus);
+	}, [model, gitStatus]);
+
+	useEffect(() => {
+		suppressSelectionChangeRef.current = true;
+		try {
+			syncPierreTreeSelection(model, selectedPath);
+		} finally {
+			suppressSelectionChangeRef.current = false;
+		}
+	}, [model, paths, selectedPath]);
 
 	return <FileTree model={model} style={{ height: "100%" }} />;
 }
