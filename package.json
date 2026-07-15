@@ -16,7 +16,6 @@
       "./node_modules/mitsupi/extensions/todos.ts",
       "./node_modules/mitsupi/extensions/files.ts",
       "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
-      "./node_modules/pi-interactive-subagents/pi-extension/session-artifacts/index.ts",
       "./pi-extension/diff-review/index.ts",
       "./pi-extension/subagent-model-overrides/index.ts"
     ],
