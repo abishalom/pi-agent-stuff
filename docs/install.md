@@ -7,7 +7,7 @@ This repo no longer ships its own subagents implementation.
 It now depends on the upstream package:
 - `git:github.com/HazAT/pi-interactive-subagents`
 
-In this repo, that upstream package is consumed through `node_modules/` as an npm dependency. The only local subagent-specific code left here is the runtime model/thinking override extension.
+In this repo, that upstream package is consumed through `node_modules/` as an npm dependency. Local subagent-specific additions are limited to the model/thinking override extension and the Herdr orchestration skill.
 
 ## Local install steps
 
@@ -41,6 +41,10 @@ Optional:
 ```bash
 export PI_SUBAGENT_MUX=tmux
 ```
+
+For explicit Herdr orchestration, use the packaged `herdr` skill and follow
+`docs/2026-07-15-herdr-subagents-usage.md`. Herdr is not currently a native
+`pi-interactive-subagents` backend.
 
 ## Direct upstream install vs repo-managed install
 

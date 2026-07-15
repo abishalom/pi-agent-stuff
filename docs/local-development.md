@@ -49,6 +49,10 @@ Optional:
 export PI_SUBAGENT_MUX=tmux
 ```
 
+For explicit Herdr orchestration, use the packaged `herdr` skill and follow
+`docs/2026-07-15-herdr-subagents-usage.md`. Herdr is not currently a native
+`pi-interactive-subagents` backend.
+
 ### 5. Reload after config or extension changes
 
 ```text

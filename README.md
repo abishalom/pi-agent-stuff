@@ -10,6 +10,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/subagent-model-overrides` — apply local model/thinking policy to subagents
+- `skills/herdr` — instructions for explicit Herdr-based subagent orchestration
 - `skills/` and `prompts/` — local reusable Pi resources
 
 ### Selected upstream resources loaded through `node_modules`
@@ -19,7 +20,6 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
   - `skills/uv/SKILL.md`
 - from `pi-interactive-subagents`
   - `pi-extension/subagents`
-  - `pi-extension/session-artifacts`
 
 The idea is simple: this repo curates which upstream Pi resources get loaded, while keeping a small number of local replacements when repo-specific behavior is needed.
 
@@ -142,18 +142,23 @@ Current policy:
 
 | Agent | Model | Thinking |
 |---|---|---|
-| `planner` | `openai-codex/gpt-5.4` | `high` |
-| `scout` | `openai-codex/gpt-5.4-mini` | `minimal` |
-| `worker` | `openai-codex/gpt-5.4` | `medium` |
-| `reviewer` | `openai-codex/gpt-5.4` | `high` |
-| `visual-tester` | `openai-codex/gpt-5.4` | `low` |
+| `planner` | `openai-codex/gpt-5.6-sol` | `high` |
+| `scout` | `openai-codex/gpt-5.6-luna` | `minimal` |
+| `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
+| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
+| `visual-tester` | `openai-codex/gpt-5.6-luna` | `low` |
 
 ## Multiplexer support
 
-The upstream subagents package supports:
+The upstream subagents package natively supports:
 - `cmux`
 - `tmux`
 - `zellij`
+- `wezterm`
+
+Herdr is supported through the packaged `skills/herdr` instructions for manual
+pane orchestration; it is not currently a native upstream mux backend. See
+`docs/2026-07-15-herdr-subagents-usage.md`.
 
 Examples:
 

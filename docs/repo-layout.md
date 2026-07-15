@@ -6,6 +6,7 @@
 - `pi-extension/notify-finished/` — long-running prompt notifications
 - `pi-extension/session-changed-files/` — per-session changed-file tracking
 - `pi-extension/subagent-model-overrides/` — runtime model/thinking overrides for upstream subagents
+- `skills/herdr/` — instructions for explicit Herdr-based subagent orchestration
 - `config/answer.json` — repo-managed `/answer` behavior
 - `config/subagent-model-overrides.json` — repo-managed per-agent model/thinking policy
 - `skills/` — reusable Pi skills
@@ -19,7 +20,6 @@
 These are not implemented in this repo anymore. They are loaded from `node_modules/pi-interactive-subagents/`:
 
 - subagents extension
-- session-artifacts extension
 - bundled agent prompts
 
 ## Why the split exists
