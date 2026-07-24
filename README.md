@@ -13,13 +13,12 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 - `prompts/review.md` — parallel standards/requirements review in a shared Hunk session
 - `skills/` and `prompts/` — local reusable Pi resources
 
-### Selected upstream resources loaded through `node_modules`
-- from `mitsupi`
-  - `extensions/todos.ts`
-  - `extensions/files.ts`
-  - `skills/uv/SKILL.md`
+### Bundled resources adapted from `mitsupi`
+- `pi-extension/mitsupi/todos.ts`
+- `pi-extension/mitsupi/files.ts`
+- `skills/uv/SKILL.md`
 
-The idea is simple: this repo curates which upstream Pi resources get loaded while keeping local integrations where repo-specific behavior is needed.
+These resources are bundled locally and use the current `@earendil-works/pi-*` packages. This avoids installing `mitsupi`'s obsolete `@mariozechner/pi-*` peer dependencies and their deprecation warnings.
 
 ## Install
 
@@ -47,34 +46,17 @@ pi -e /home/ashalom/Github/pi-agent-stuff
 - Commit both `package.json` and `package-lock.json` when dependency versions change
 - On another device, clone the repo, run `npm install`, then `pi install /path/to/pi-agent-stuff`
 
-### Adding more resources from an upstream package
+### Adding more resources
 
-If you want another extension, skill, prompt, or theme from a dependency such as `mitsupi`, add its path to the `pi` section in `package.json`, then run `npm install` and `/reload`.
+Add local extensions, skills, prompts, or themes to the corresponding repo directory and register their paths in the `pi` section of `package.json`. Then run `npm install` and `/reload`.
 
-Example:
+Use this repo to curate what gets loaded. Do not also install the same resource separately in Pi, or it may be loaded twice.
 
-```json
-{
-  "pi": {
-    "extensions": [
-      "./pi-extension/answer/index.ts",
-      "./node_modules/mitsupi/extensions/todos.ts",
-      "./node_modules/mitsupi/extensions/files.ts",
-      "./node_modules/mitsupi/extensions/<another-extension>.ts"
-    ]
-  }
-}
-```
-
-Use this repo to curate what gets loaded. Do not also install the same upstream package separately in Pi, or you may load the same resource twice.
-
-## Updating upstream packages
-
-Update only what this repo depends on:
+## Updating dependencies
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm update mitsupi
+npm update
 npm test
 ```
 
@@ -92,7 +74,7 @@ pi install /home/ashalom/Github/pi-agent-stuff
 
 ## Avoid duplicate loading
 
-If this repo is the source of truth, do **not** also install `npm:mitsupi` separately in Pi. Do not install the removed `pi-interactive-subagents` package alongside this package, because it registers conflicting subagent tools and commands.
+If this repo is the source of truth, do **not** install a second copy of these bundled resources separately in Pi. Do not install the removed `pi-interactive-subagents` package alongside this package, because it registers conflicting subagent tools and commands.
 
 ## Subagents in this repo
 

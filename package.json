@@ -13,14 +13,14 @@
       "./pi-extension/session-changed-files/index.ts",
       "./pi-extension/prompt-stash/index.ts",
       "./pi-extension/answer/index.ts",
-      "./node_modules/mitsupi/extensions/todos.ts",
-      "./node_modules/mitsupi/extensions/files.ts",
+      "./pi-extension/mitsupi/todos.ts",
+      "./pi-extension/mitsupi/files.ts",
       "./pi-extension/herdr-subagents/index.ts",
       "./pi-extension/diff-review/index.ts"
     ],
     "skills": [
       "./skills",
-      "./node_modules/mitsupi/skills/uv/SKILL.md"
+      "./skills/uv/SKILL.md"
     ],
     "prompts": [
       "./prompts"
@@ -35,7 +35,6 @@
     "@pierre/diffs": "^1.1.22",
     "@pierre/trees": "^1.0.0-beta.3",
     "glimpseui": "^0.6.2",
-    "mitsupi": "^1.6.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typebox": "^1.3.7"
