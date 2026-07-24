@@ -1,13 +1,8 @@
 # Install notes
 
-## What changed
+## Included subagent implementation
 
-This repo no longer ships its own subagents implementation.
-
-It now depends on the upstream package:
-- `git:github.com/HazAT/pi-interactive-subagents`
-
-In this repo, that upstream package is consumed through `node_modules/` as an npm dependency. Local subagent-specific additions are limited to the model/thinking override extension and the Herdr orchestration skill.
+This repo ships its own Herdr-native Pi subagents extension under `pi-extension/herdr-subagents/`. Herdr is the only v1 backend. Do not separately install `pi-interactive-subagents`; it registers conflicting tools and commands.
 
 ## Local install steps
 
@@ -24,44 +19,23 @@ npm install
 pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
-### 3. Start Pi inside a supported multiplexer
-
-Examples:
+### 3. Install or refresh Herdr's Pi integration
 
 ```bash
-cmux pi
-# or
-tmux new -A -s pi 'pi'
-# or
-zellij --session pi
+herdr integration install pi
 ```
 
-Optional:
+### 4. Start Pi inside Herdr
 
-```bash
-export PI_SUBAGENT_MUX=tmux
+Launch or attach to Herdr, open a shell pane, and run `pi` there. The subagent extension requires Pi's TUI mode plus `HERDR_ENV=1` and `HERDR_PANE_ID`, which Herdr injects automatically.
+
+### 5. Reload after package changes
+
+```text
+/reload
 ```
 
-For explicit Herdr orchestration, use the packaged `herdr` skill and follow
-`docs/2026-07-15-herdr-subagents-usage.md`. Herdr is not currently a native
-`pi-interactive-subagents` backend.
-
-## Direct upstream install vs repo-managed install
-
-The upstream package recommends:
-
-```bash
-pi install git:github.com/HazAT/pi-interactive-subagents
-```
-
-That works if you want to use the package directly.
-
-This repo uses a different setup on purpose:
-- upstream package behavior comes from the dependency in `node_modules/`
-- local model/thinking policy comes from this repo
-- prompts stay upstream
-
-Use the repo-managed install when you want this repo's override policy.
+See `docs/2026-07-15-herdr-subagents-usage.md` for commands, tools, roles, lifecycle behavior, and manual fallback instructions.
 
 ## Config
 
@@ -69,34 +43,20 @@ Per-agent model and thinking settings live in:
 
 - `config/subagent-model-overrides.json`
 
-Reload Pi after changes:
+Bundled adapted role definitions live in:
 
-```text
-/reload
-```
+- `pi-extension/herdr-subagents/agents/`
 
-## Updating the upstream extension
+Trusted projects can override definitions under `.pi/agents/`; global definitions live under Pi's agent directory. Reload Pi after changing definitions or policy.
 
-This repo does not update upstream through `pi install git:github.com/HazAT/pi-interactive-subagents`.
+## Updating dependencies
 
-Instead, update the npm dependency that this repo loads from `node_modules/`:
+Update only dependencies declared by this package:
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm update pi-interactive-subagents
+npm update
 npm test
 ```
 
-Then either reload Pi or reinstall this repo package:
-
-```text
-/reload
-```
-
-or:
-
-```bash
-pi install /home/ashalom/Github/pi-agent-stuff
-```
-
-If you want to pin a tag or commit instead of the moving default branch, change the dependency spec in `package.json`, run `npm install`, and commit the updated lockfile.
+Commit both `package.json` and `package-lock.json` when dependency versions change, then reload Pi or reinstall this repo package.

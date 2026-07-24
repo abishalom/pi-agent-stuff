@@ -6,15 +6,9 @@ This repo is the source of truth for the `pi-agent-stuff` package.
 
 ### 1. Edit in the repo
 
-Make changes in:
-
-- `~/Github/pi-agent-stuff`
-
-Do not treat `~/.pi/agent/extensions/` as the source of truth.
+Make changes in `~/Github/pi-agent-stuff`. Do not treat `~/.pi/agent/extensions/` as the source of truth.
 
 ### 2. Install dependencies after pulling changes
-
-Because this package loads the upstream subagents package from `node_modules/`, install dependencies locally:
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
@@ -33,53 +27,39 @@ For a one-off run:
 pi -e /home/ashalom/Github/pi-agent-stuff
 ```
 
-### 4. Start Pi inside a supported multiplexer
+### 4. Run Pi inside Herdr
+
+Herdr is the only v1 subagent backend. Ensure its Pi integration is current:
 
 ```bash
-cmux pi
-# or
-tmux new -A -s pi 'pi'
-# or
-zellij --session pi
+herdr integration install pi
 ```
 
-Optional:
+Then run Pi in a Herdr pane. Do not set `PI_SUBAGENT_MUX`; this implementation uses Herdr's native `agent`, `pane`, and `tab` commands directly.
+
+### 5. Validate changes
 
 ```bash
-export PI_SUBAGENT_MUX=tmux
+npm test
+npx tsc --noEmit --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck pi-extension/herdr-subagents/*.ts
 ```
 
-For explicit Herdr orchestration, use the packaged `herdr` skill and follow
-`docs/2026-07-15-herdr-subagents-usage.md`. Herdr is not currently a native
-`pi-interactive-subagents` backend.
+The automated tests inject a fake `HerdrClient` and never create real panes. Perform deliberate manual Herdr smoke tests separately and close only surfaces created by the test.
 
-### 5. Reload after config or extension changes
+### 6. Reload after config or extension changes
 
 ```text
 /reload
 ```
 
-## Cutover notes
+A reload stops parent monitoring but intentionally leaves existing child panes and Pi processes running. The replacement parent runtime does not reconnect them in v1.
 
-Avoid loading duplicate copies of subagents.
+## Avoid duplicate subagent extensions
 
-Do not use both of these at the same time unless you want duplicates:
-- this repo package
-- a separate direct Pi install of `git:github.com/HazAT/pi-interactive-subagents`
-
-## Updating upstream
-
-From the repo root:
-
-```bash
-npm update pi-interactive-subagents
-npm test
-```
-
-Then reload Pi or reinstall the local package.
+Do not install `pi-interactive-subagents` alongside this package. It defines overlapping tool and command names.
 
 ## Stable vs experimental
 
-- Stable/shareable resources belong in the normal package directories
-- WIP resources belong under `experimental/`
-- `experimental/` is committed to git but excluded from the package manifest by default
+- Stable/shareable resources belong in the normal package directories.
+- WIP resources belong under `experimental/`.
+- `experimental/` is committed to git but excluded from the package manifest by default.

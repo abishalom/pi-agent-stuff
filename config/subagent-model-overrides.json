@@ -3,9 +3,9 @@
     "model": "openai-codex/gpt-5.6-sol",
     "thinking": "high"
   },
-  "scout": {
+  "explorer": {
     "model": "openai-codex/gpt-5.6-luna",
-    "thinking": "minimal"
+    "thinking": "low"
   },
   "worker": {
     "model": "openai-codex/gpt-5.6-terra",
@@ -14,9 +14,5 @@
   "reviewer": {
     "model": "openai-codex/gpt-5.6-sol",
     "thinking": "high"
-  },
-  "visual-tester": {
-    "model": "openai-codex/gpt-5.6-luna",
-    "thinking": "low"
   }
 }

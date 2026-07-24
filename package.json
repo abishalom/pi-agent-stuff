@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Personal Pi package with utility extensions, selected upstream extensions, reusable skills, prompts, and upstream interactive subagents with local model/thinking overrides.",
+  "description": "Personal Pi package with utility extensions, Herdr-native interactive subagents, reusable skills, and prompts.",
   "keywords": [
     "pi-package"
   ],
@@ -15,9 +15,8 @@
       "./pi-extension/answer/index.ts",
       "./node_modules/mitsupi/extensions/todos.ts",
       "./node_modules/mitsupi/extensions/files.ts",
-      "./node_modules/pi-interactive-subagents/pi-extension/subagents/index.ts",
-      "./pi-extension/diff-review/index.ts",
-      "./pi-extension/subagent-model-overrides/index.ts"
+      "./pi-extension/herdr-subagents/index.ts",
+      "./pi-extension/diff-review/index.ts"
     ],
     "skills": [
       "./skills",
@@ -37,19 +36,19 @@
     "@pierre/trees": "^1.0.0-beta.3",
     "glimpseui": "^0.6.2",
     "mitsupi": "^1.6.0",
-    "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "typebox": "^1.3.7"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "@sinclair/typebox": "*"
+    "@earendil-works/pi-ai": ">=0.81.1",
+    "@earendil-works/pi-coding-agent": ">=0.81.1",
+    "@earendil-works/pi-tui": ">=0.81.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.81.1",
+    "@earendil-works/pi-coding-agent": "^0.81.1",
+    "@earendil-works/pi-tui": "^0.81.1",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "^6.0.3",
     "vite": "^8.0.13"

@@ -3,37 +3,32 @@
 ## Stable package surface
 
 - `pi-extension/answer/` — local `/answer` replacement with configurable source/model selection
+- `pi-extension/diff-review/` — local browser-based diff review workflow
+- `pi-extension/herdr-subagents/` — Herdr-native persistent Pi child orchestration
+  - `agents/` — adapted Explorer, Planner, Worker, and Reviewer definitions
+  - `herdr.ts` — typed Herdr CLI adapter
+  - `monitor.ts` — lifecycle and follow-up queue state machine
+  - `session-reader.ts` — incremental child JSONL extraction
+  - `delivery.ts` — parent result coalescing and rendering
+  - `ui.ts` — tools and `/subagent`
 - `pi-extension/notify-finished/` — long-running prompt notifications
 - `pi-extension/session-changed-files/` — per-session changed-file tracking
-- `pi-extension/subagent-model-overrides/` — runtime model/thinking overrides for upstream subagents
-- `skills/herdr/` — instructions for explicit Herdr-based subagent orchestration
 - `config/answer.json` — repo-managed `/answer` behavior
-- `config/subagent-model-overrides.json` — repo-managed per-agent model/thinking policy
+- `config/subagent-model-overrides.json` — repo-managed per-role model/thinking policy
 - `skills/` — reusable Pi skills
 - `prompts/` — reusable prompt templates
+  - `review.md` — parallel Standards and Requirements reviewers sharing one Hunk session
 - `docs/` — project docs and design notes
 - `examples/` — sample config and usage notes
-- `test/` — automated tests
+- `test/` — automated tests, including fake-Herdr subagent lifecycle coverage
 
 ## Upstream resources loaded through this package
 
-These are not implemented in this repo anymore. They are loaded from `node_modules/pi-interactive-subagents/`:
+The package currently loads selected todo/file extensions and the UV skill from `mitsupi`. Subagent prompts and orchestration are implemented locally rather than loaded from `pi-interactive-subagents`.
 
-- subagents extension
-- bundled agent prompts
+## Ownership boundary
 
-## Why the split exists
-
-The upstream package owns:
-- agent prompts
-- orchestration behavior
-- multiplexer integration
-- subagent tools and commands
-
-This repo owns:
-- local utility extensions
-- model/thinking policy for subagents
-- package-level docs and examples
+Herdr owns terminal topology, navigation, labels, and coarse lifecycle state. Pi child session JSONL is authoritative for exact assistant responses. The parent extension owns only children launched by its current in-memory runtime.
 
 ## Experimental area
 

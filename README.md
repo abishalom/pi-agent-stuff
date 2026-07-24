@@ -9,19 +9,17 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 - `pi-extension/diff-review` — local `/diff-review` replacement with a browser-based review UI
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
-- `pi-extension/subagent-model-overrides` — apply local model/thinking policy to subagents
-- `skills/herdr` — instructions for explicit Herdr-based subagent orchestration
+- `pi-extension/herdr-subagents` — persistent interactive Pi children hosted natively by Herdr
+- `prompts/review.md` — parallel standards/requirements review in a shared Hunk session
 - `skills/` and `prompts/` — local reusable Pi resources
 
 ### Selected upstream resources loaded through `node_modules`
 - from `mitsupi`
-  - `pi-extensions/todos.ts`
-  - `pi-extensions/files.ts`
+  - `extensions/todos.ts`
+  - `extensions/files.ts`
   - `skills/uv/SKILL.md`
-- from `pi-interactive-subagents`
-  - `pi-extension/subagents`
 
-The idea is simple: this repo curates which upstream Pi resources get loaded, while keeping a small number of local replacements when repo-specific behavior is needed.
+The idea is simple: this repo curates which upstream Pi resources get loaded while keeping local integrations where repo-specific behavior is needed.
 
 ## Install
 
@@ -76,7 +74,7 @@ Update only what this repo depends on:
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm update mitsupi pi-interactive-subagents
+npm update mitsupi
 npm test
 ```
 
@@ -94,17 +92,24 @@ pi install /home/ashalom/Github/pi-agent-stuff
 
 ## Avoid duplicate loading
 
-If this repo is the source of truth, do **not** also install these separately in Pi:
-- `npm:mitsupi`
-- `pi-interactive-subagents`
-
-Otherwise the same extensions may load twice.
+If this repo is the source of truth, do **not** also install `npm:mitsupi` separately in Pi. Do not install the removed `pi-interactive-subagents` package alongside this package, because it registers conflicting subagent tools and commands.
 
 ## Subagents in this repo
 
-Subagent behavior comes from upstream `pi-interactive-subagents`. This repo only controls model and thinking defaults through:
+`pi-extension/herdr-subagents` launches persistent Pi children in background Herdr tabs by default, with an explicit split override. Use `/subagent`, the `subagent` tool, `subagent_followup`, `subagent_interrupt`, `get_subagent_result`, and `subagents_list`. Exact responses are extracted from child session JSONL and relayed to the parent.
 
-- `config/subagent-model-overrides.json`
+Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking policy lives in `config/subagent-model-overrides.json`. See `docs/2026-07-15-herdr-subagents-usage.md`.
+
+| Agent | Model | Thinking |
+|---|---|---|
+| `explorer` | `openai-codex/gpt-5.6-luna` | `low` |
+| `planner` | `openai-codex/gpt-5.6-sol` | `high` |
+| `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
+| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
+
+### `/review`
+
+`/review [spec path or instructions]` reviews the uncommitted working tree along two independent axes. It discovers repository standards and requirements, asks before proceeding when either source is missing or ambiguous, prepares one shared Hunk session, and launches separate Standards and Requirements reviewer subagents. Their tagged Hunk findings are aggregated under separate headings after both finish.
 
 ### `/diff-review`
 
@@ -138,40 +143,14 @@ Default config:
 Optional override:
 - `thinkingLevel` in `config/answer.json` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`)
 
-Current policy:
-
-| Agent | Model | Thinking |
-|---|---|---|
-| `planner` | `openai-codex/gpt-5.6-sol` | `high` |
-| `scout` | `openai-codex/gpt-5.6-luna` | `minimal` |
-| `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
-| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
-| `visual-tester` | `openai-codex/gpt-5.6-luna` | `low` |
-
 ## Multiplexer support
 
-The upstream subagents package natively supports:
-- `cmux`
-- `tmux`
-- `zellij`
-- `wezterm`
-
-Herdr is supported through the packaged `skills/herdr` instructions for manual
-pane orchestration; it is not currently a native upstream mux backend. See
-`docs/2026-07-15-herdr-subagents-usage.md`.
-
-Examples:
+Herdr is the only v1 subagent backend. Start Pi from a Herdr-managed pane and keep the Pi integration current:
 
 ```bash
-cmux pi
-# or
-tmux new -A -s pi 'pi'
-# or
-zellij --session pi
+herdr
+# run pi inside the Herdr pane
+herdr integration install pi
 ```
 
-Optional:
-
-```bash
-export PI_SUBAGENT_MUX=tmux
-```
+The extension rejects launches outside the Pi TUI or outside Herdr. Direct non-subagent Pi usage is unaffected.

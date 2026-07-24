@@ -1,68 +1,84 @@
 # 2026-07-15 Herdr subagents usage
 
-This package includes a `herdr` skill for explicit Herdr-based agent orchestration.
+This package includes a Herdr-native Pi subagents extension and a `herdr` skill for direct terminal orchestration.
 
-## Support boundary
+## Requirements
 
-The upstream `pi-interactive-subagents` package currently supports `cmux`, `tmux`,
-`zellij`, and `wezterm` as native multiplexer backends. Herdr is not currently a
-native backend, so do not set `PI_SUBAGENT_MUX=herdr`.
+- Run the parent Pi TUI inside Herdr (`HERDR_ENV=1`).
+- Keep Herdr's Pi integration current:
 
-When Herdr is requested, use the Herdr CLI directly. This gives the child agent a
-real Herdr pane and preserves Herdr status tracking, but it does not provide the
-upstream extension's automatic result steering, interruption, or resume behavior.
+  ```bash
+  herdr integration install pi
+  ```
 
-## Manual Herdr workflow
+- Configure credentials for the selected child model in Pi.
 
-Confirm that the current session is Herdr-managed:
+The extension validates these requirements before creating a child surface.
 
-```bash
-test "${HERDR_ENV:-}" = 1
+## Launching a child
+
+Use the `subagent` tool or `/subagent` command:
+
+```text
+/subagent explorer Find the authentication entry points
+/subagent reviewer --placement split Review the current diff
 ```
 
-Create a sibling pane without stealing focus:
+Bare `/subagent` opens an interactive role, placement, and task picker.
+
+Children open in background tabs by default. Pass `placement: "split"` to the tool or `--placement split` to the command for a sibling split. A launch returns after Pi is ready and the initial task has been submitted; the child continues asynchronously.
+
+Each child is a persistent interactive Pi session. Enter its Herdr pane to watch progress, answer questions, or continue the conversation directly. The extension does not close child panes after a response.
+
+## Bundled roles
+
+| Role | Model | Thinking | Tools | Purpose |
+|---|---|---|---|---|
+| `explorer` | `openai-codex/gpt-5.6-luna` | `low` | `read,bash` | Read-only reconnaissance |
+| `planner` | `openai-codex/gpt-5.6-sol` | `high` | `read,bash` | Investigation and implementation planning |
+| `worker` | `openai-codex/gpt-5.6-terra` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
+| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` | `read,bash` | Read-only actionable review findings |
+
+The resolved model/thinking policy comes from `config/subagent-model-overrides.json`. Trusted projects may override role definitions under `.pi/agents/`; global definitions live under Pi's agent directory. Use `subagents_list` to inspect resolved definitions and diagnostics.
+
+## Parent control tools
+
+- `subagent_followup`: submit a follow-up immediately or queue it FIFO behind active work.
+- `subagent_interrupt`: send Escape to a working child without closing its pane or Pi process.
+- `get_subagent_result`: return the latest completed response without waiting.
+- `subagents_list`: show resolved role definitions and discovery diagnostics.
+
+Control tools accept only pane IDs launched by the current parent runtime. They reject unrelated panes and children surviving an earlier `/reload`, session replacement, or parent process.
+
+A blocked child may be displaying a selector or permission prompt. Follow-ups are queued, and interrupts require direct pane interaction rather than blindly injecting text or Escape.
+
+## Result delivery
+
+Herdr provides coarse child lifecycle status. The extension reads exact responses from the child's Pi session JSONL and automatically sends completed responses back to the parent.
+
+Closely timed events are combined into one parent follow-up after a 500 ms debounce. Expand the custom result message to see role/model, pane ID, classification, elapsed time, and session path. Parent messages are capped at 50 KiB; the full response remains in the child JSONL.
+
+Direct turns initiated in a child pane are also relayed to the parent.
+
+## Lifecycle and safety
+
+- Children share the parent checkout; do not run concurrent writing workers unless their files are known to be disjoint.
+- Child tool allowlists reduce accidental mutation but are not a security sandbox, especially when `bash` is available.
+- Nested subagent delegation is disabled in children.
+- `/reload`, `/new`, `/resume`, `/fork`, and parent exit stop monitoring but leave child panes and Pi processes running for direct use.
+- V1 does not reconnect surviving children, create worktrees, retry failed models, or auto-close surfaces.
+
+## Manual Herdr fallback
+
+For direct terminal orchestration outside the extension, use Herdr's current CLI syntax and parse returned JSON IDs rather than predicting them:
 
 ```bash
 herdr pane split --current --direction right --no-focus
-```
-
-Parse the JSON response for the returned `pane_id`; never predict pane IDs. Then:
-
-```bash
-herdr pane rename <pane_id> "scout"
-herdr pane run <pane_id> "pi"
-herdr wait agent-status <pane_id> --status idle --timeout 30000
-herdr pane run <pane_id> "Read the requested files and report concise findings."
-herdr wait agent-status <pane_id> --status done --timeout 120000
+herdr pane rename <pane_id> "manual-child"
+herdr agent start manual-child --kind pi --pane <pane_id> --timeout 30000
+herdr agent prompt <pane_id> "Investigate the requested issue."
+herdr agent wait <pane_id> --until idle --until done --timeout 120000
 herdr pane read <pane_id> --source recent-unwrapped --lines 120
 ```
 
-If the pane is visible to the user, completion may report as `idle` instead of
-`done`; inspect `herdr pane get <pane_id>` and treat either state as complete.
-Use `--direction down` when the current layout is narrow or tall. Keep the user's
-focus in the calling pane with `--no-focus`.
-
-## Safety rules
-
-- Run `herdr --help` and the relevant command-group help before relying on syntax.
-- Use `--current` or IDs returned by Herdr; do not target the focused pane implicitly.
-- Do not close panes, tabs, or workspaces that the current task did not create.
-- Do not run `herdr server stop` from an active session.
-- Use the normal `pi` executable in child panes so the installed package and model
-  override extension are loaded.
-
-## Agent model policy
-
-The package applies these local model/thinking defaults through
-`config/subagent-model-overrides.json`:
-
-| Agent | Model | Thinking |
-|---|---|---|
-| `planner` | `openai-codex/gpt-5.6-sol` | `high` |
-| `scout` | `openai-codex/gpt-5.6-luna` | `minimal` |
-| `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
-| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
-| `visual-tester` | `openai-codex/gpt-5.6-luna` | `low` |
-
-`claude-code` remains an external CLI agent and is not configured by the
-OpenAI-Codex model override file.
+Treat both `idle` and `done` as settled. Use `--no-focus`, target `--current` or explicit returned IDs, and never close Herdr resources you did not create.
