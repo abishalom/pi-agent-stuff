@@ -43,3 +43,39 @@ An unrelated prompt-contract improvement was **not** part of this rollback:
 - the diff-review prompt change that explicitly allows requested code edits during review replies and requires reporting those edits back.
 
 That prompt change was retained because it is conceptually separate from the two unresolved browser bugs.
+
+## Follow-up cleanup after rollback
+After the rollback, a smaller cleanup pass was attempted for the **tree integration only**.
+
+This follow-up did **not** fix the repo-tree collapse/re-expand bug either, but it did simplify the Pierre adapter logic substantially.
+
+### Conceptual cleanup changes made
+- Removed the custom `areTreePathsEqual(...)` path-content comparator from the Pierre adapter layer.
+- Stopped manufacturing fresh visible-path arrays on every read from review-session state.
+- Changed `getVisiblePaths()` to return the underlying stable state arrays directly:
+  - `changedPaths` in changed-only mode
+  - `paths` in full-tree mode
+- Removed the extra visible-path identity stabilization layer from `App.tsx`.
+- Simplified the tree reset guard so the Pierre adapter now resets only when the visible `paths` reference itself changes.
+- Kept tree sync responsibilities narrow:
+  - `resetPaths(...)` for visible-tree changes
+  - `setGitStatus(...)` for git decorations
+  - selection sync separately
+- Kept the review-session no-op guard for redundant same-path file selection.
+
+### Result of the cleanup pass
+- The code is cleaner and closer to Pierre's intended long-lived-model usage.
+- The browser repro still persisted: collapsing one folder and then selecting a file elsewhere could still cause the collapsed folder to re-expand.
+- So the underlying tree bug remains unresolved.
+
+### Branch / commit for the cleanup pass
+- Branch: `ash/diff-review-tree-cleanup`
+- Commit: `521f83e` — `Simplify diff review tree sync`
+
+### Files updated in the cleanup pass
+- `pi-extension/diff-review/web/src/App.tsx`
+- `pi-extension/diff-review/web/src/adapters/pierre-tree-model.ts`
+- `pi-extension/diff-review/web/src/adapters/pierre-trees.tsx`
+- `pi-extension/diff-review/web/src/state/review-session.ts`
+- `test/extensions/diff-review-web-smoke.test.mjs`
+- rebuilt diff-review static assets under `pi-extension/diff-review/static/`

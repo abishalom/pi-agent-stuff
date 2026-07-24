@@ -77,6 +77,7 @@ export function App() {
 	}, [sessionState?.selectedPath]);
 
 	const visiblePaths = sessionState?.getVisiblePaths() ?? [];
+	const treeReloadDebugSignal = sessionState?.getTreeReloadDebugSignal() ?? null;
 	const nextSelectedThreads = useMemo(
 		() => sortThreads(sessionState?.getThreadsForSelectedPath() ?? [], threadSortMode),
 		[sessionState, sessionState?.selectedPath, sessionState?.threads, threadSortMode],
@@ -138,7 +139,13 @@ export function App() {
 		<ReviewLayout
 			left={<div style={getPaneStackStyle()}>
 				<FilterBar showChangedOnly={sessionState.showChangedOnly} onToggle={() => sessionState.setShowChangedOnly(!sessionState.showChangedOnly)} warning={sessionState.getBannerMessage()} />
-				<RepoTreePanel paths={visiblePaths} changedFiles={sessionState.changedFiles} selectedPath={sessionState.selectedPath} onSelect={handleSelectPath} />
+				<RepoTreePanel
+					paths={visiblePaths}
+					changedFiles={sessionState.changedFiles}
+					selectedPath={sessionState.selectedPath}
+					onSelect={handleSelectPath}
+					treeReloadDebugSignal={treeReloadDebugSignal}
+				/>
 			</div>}
 			center={<div style={{ ...getPaneStackStyle(), position: "relative" }}>
 				<DiffToolbar

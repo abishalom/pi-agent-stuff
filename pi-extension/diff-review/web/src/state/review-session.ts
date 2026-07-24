@@ -9,6 +9,7 @@ import type {
 	SessionClosedEvent,
 	SessionStateEvent,
 } from "../types.ts";
+import type { TreeReloadDebugSignal } from "../debug.ts";
 
 export type ReviewSessionState = ReturnType<typeof createReviewSessionState>;
 
@@ -35,8 +36,14 @@ function findThread(threads: ReviewThread[], threadId: string) {
 
 export function createReviewSessionState(payload: BootstrapPayload) {
 	let nextDraftId = 1;
+	let nextTreeReloadSequence = 1;
 	const listeners = new Set<() => void>();
 	const collapsedThreadIds = new Set<string>();
+
+	function createTreeReloadDebugSignal(reason: string, detail?: Record<string, unknown>): TreeReloadDebugSignal {
+		return { sequence: nextTreeReloadSequence++, reason, detail };
+	}
+
 	const state = {
 		reviewSessionId: payload.reviewSessionId,
 		repoRoot: payload.repoRoot,
@@ -57,6 +64,12 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		draft: null as DraftComment | null,
 		connectionState: "connecting" as ConnectionState,
 		errorMessage: null as string | null,
+		treeReloadDebugSignal: createTreeReloadDebugSignal("initial-state", {
+			showChangedOnly: true,
+			pathCount: payload.paths.length,
+			changedPathCount: payload.changedPaths.length,
+			visiblePathCount: payload.changedPaths.length,
+		}),
 		subscribe(listener: () => void) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
@@ -71,9 +84,20 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.emit();
 		},
 		setShowChangedOnly(value: boolean) {
+			const changed = state.showChangedOnly !== value;
 			state.showChangedOnly = value;
 			if (value && state.selectedPath && !state.changedPaths.includes(state.selectedPath)) {
 				state.selectedPath = state.changedPaths[0] ?? null;
+			}
+			if (changed) {
+				const visiblePaths = value ? state.changedPaths : state.paths;
+				state.treeReloadDebugSignal = createTreeReloadDebugSignal("filter-toggle", {
+					showChangedOnly: value,
+					pathCount: state.paths.length,
+					changedPathCount: state.changedPaths.length,
+					visiblePathCount: visiblePaths.length,
+					selectedPath: state.selectedPath,
+				});
 			}
 			state.emit();
 		},
@@ -169,13 +193,16 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 			state.submissionHistory = [...next.submissionHistory];
 			state.files = [...next.files];
 			state.focusedThreadId = null;
-			state.applyTree(next, { emit: false, fallbackPath: next.files[0]?.path ?? null });
+			state.applyTree(next, { emit: false, fallbackPath: next.files[0]?.path ?? null, reason: "bootstrap" });
 			state.threads = cloneThreads(next.threads);
 			state.connectionState = "open";
 			state.errorMessage = null;
 			state.emit();
 		},
-		applyTree(next: Pick<BootstrapPayload, "paths" | "changedPaths" | "changedFiles">, options?: { emit?: boolean; fallbackPath?: string | null }) {
+		applyTree(
+			next: Pick<BootstrapPayload, "paths" | "changedPaths" | "changedFiles">,
+			options?: { emit?: boolean; fallbackPath?: string | null; reason?: string },
+		) {
 			state.paths = [...next.paths];
 			state.changedPaths = [...next.changedPaths];
 			state.changedFiles = [...next.changedFiles];
@@ -186,6 +213,15 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 				state.selectedPath = state.changedPaths[0] ?? state.paths[0] ?? options?.fallbackPath ?? null;
 				state.focusedThreadId = null;
 			}
+			const visiblePaths = state.showChangedOnly ? state.changedPaths : state.paths;
+			state.treeReloadDebugSignal = createTreeReloadDebugSignal(options?.reason ?? "applyTree", {
+				showChangedOnly: state.showChangedOnly,
+				pathCount: state.paths.length,
+				changedPathCount: state.changedPaths.length,
+				visiblePathCount: visiblePaths.length,
+				selectedPath: state.selectedPath,
+				mustReselect,
+			});
 			if (options?.emit !== false) {
 				state.emit();
 			}
@@ -240,6 +276,9 @@ export function createReviewSessionState(payload: BootstrapPayload) {
 		},
 		getVisiblePaths() {
 			return state.showChangedOnly ? state.changedPaths : state.paths;
+		},
+		getTreeReloadDebugSignal() {
+			return state.treeReloadDebugSignal;
 		},
 		getThreadsForSelectedPath() {
 			if (!state.selectedPath) return [];

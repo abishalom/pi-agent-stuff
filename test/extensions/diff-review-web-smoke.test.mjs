@@ -244,6 +244,26 @@ test("frontend review-session state keeps visible path array identity stable unt
 	assert.deepEqual(state.getVisiblePaths(), ["src/c.ts"]);
 });
 
+test("frontend review-session state tracks the latest tree reload reason for debug logging", () => {
+	const state = createReviewSessionState(makeBootstrapPayload());
+	assert.equal(state.getTreeReloadDebugSignal().reason, "initial-state");
+
+	state.setShowChangedOnly(false);
+	const afterToggle = state.getTreeReloadDebugSignal();
+	assert.equal(afterToggle.reason, "filter-toggle");
+	assert.equal(afterToggle.detail?.showChangedOnly, false);
+
+	state.applyTree({
+		paths: ["README.md", "src/a.ts", "src/c.ts"],
+		changedPaths: ["src/c.ts"],
+		changedFiles: [{ path: "src/c.ts", status: "modified" }],
+	});
+	const afterTreeApply = state.getTreeReloadDebugSignal();
+	assert.equal(afterTreeApply.reason, "applyTree");
+	assert.ok(afterTreeApply.sequence > afterToggle.sequence);
+	assert.equal(afterTreeApply.detail?.visiblePathCount, 3);
+});
+
 test("reuseShallowEqualArray preserves selected thread identity across unrelated draft edits", () => {
 	const state = createReviewSessionState(makeBootstrapPayload());
 	state.selectPath("src/a.ts");

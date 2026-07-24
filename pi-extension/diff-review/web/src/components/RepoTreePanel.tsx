@@ -1,4 +1,5 @@
 import { memo } from "react";
+import type { TreeReloadDebugSignal } from "../debug.ts";
 import type { DiffTreeEntry } from "../types.ts";
 import { PierreRepoTree } from "../adapters/pierre-trees.tsx";
 
@@ -7,11 +8,13 @@ export const RepoTreePanel = memo(function RepoTreePanel({
 	changedFiles,
 	selectedPath,
 	onSelect,
+	treeReloadDebugSignal,
 }: {
 	paths: string[];
 	changedFiles: DiffTreeEntry[];
 	selectedPath: string | null;
 	onSelect(path: string): void;
+	treeReloadDebugSignal: TreeReloadDebugSignal | null;
 }) {
 	return (
 		<div style={{ height: "100%", minHeight: 0, overflow: "hidden" }}>
@@ -20,6 +23,7 @@ export const RepoTreePanel = memo(function RepoTreePanel({
 				changedFiles={changedFiles}
 				selectedPath={selectedPath}
 				onSelect={onSelect}
+				treeReloadDebugSignal={treeReloadDebugSignal}
 			/>
 		</div>
 	);

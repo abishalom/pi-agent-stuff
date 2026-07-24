@@ -173,7 +173,9 @@ export class QnAComponent implements Component {
 		const horizontalLine = (count: number) => "─".repeat(count);
 
 		const boxLine = (content: string, leftPad: number = 2): string => {
-			const paddedContent = " ".repeat(leftPad) + content;
+			const availableWidth = Math.max(0, boxWidth - 2 - leftPad);
+			const safeContent = truncateToWidth(content, availableWidth);
+			const paddedContent = " ".repeat(leftPad) + safeContent;
 			const contentLen = visibleWidth(paddedContent);
 			const rightPad = Math.max(0, boxWidth - contentLen - 2);
 			return this.dim("│") + paddedContent + " ".repeat(rightPad) + this.dim("│");
@@ -205,7 +207,9 @@ export class QnAComponent implements Component {
 				progressParts.push(this.dim("○"));
 			}
 		}
-		lines.push(padToWidth(boxLine(progressParts.join(" "))));
+		for (const line of wrapTextWithAnsi(progressParts.join(" "), contentWidth)) {
+			lines.push(padToWidth(boxLine(line)));
+		}
 		lines.push(padToWidth(emptyBoxLine()));
 
 		const question = this.questions[this.currentIndex];
