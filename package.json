@@ -16,7 +16,8 @@
       "./pi-extension/mitsupi/todos.ts",
       "./pi-extension/mitsupi/files.ts",
       "./pi-extension/herdr-subagents/index.ts",
-      "./pi-extension/diff-review/index.ts"
+      "./pi-extension/diff-review/index.ts",
+      "./pi-extension/history-recall/index.ts"
     ],
     "skills": [
       "./skills",
@@ -35,6 +36,7 @@
     "@pierre/diffs": "^1.1.22",
     "@pierre/trees": "^1.0.0-beta.3",
     "glimpseui": "^0.6.2",
+    "minisearch": "^7.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typebox": "^1.3.7"
