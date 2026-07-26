@@ -17,6 +17,7 @@
 - `config/subagent-model-overrides.json` — repo-managed per-role model/thinking policy
 - `skills/` — reusable Pi skills
 - `prompts/` — reusable prompt templates
+  - `cleanup-subagents.md` — close finished, extension-tagged Herdr subagent panes
   - `review.md` — parallel Standards and Requirements reviewers sharing one Hunk session
 - `docs/` — project docs and design notes
 - `examples/` — sample config and usage notes

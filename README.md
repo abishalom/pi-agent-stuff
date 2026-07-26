@@ -11,6 +11,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/herdr-subagents` — persistent interactive Pi children hosted natively by Herdr
 - `prompts/review.md` — parallel standards/requirements review in a shared Hunk session
+- `prompts/cleanup-subagents.md` — close finished, role-tagged Herdr subagent panes
 - `skills/` and `prompts/` — local reusable Pi resources
 
 ### Bundled resources adapted from `mitsupi`
@@ -88,6 +89,10 @@ Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking 
 | `planner` | `openai-codex/gpt-5.6-sol` | `high` |
 | `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
 | `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
+
+### `/cleanup-subagents`
+
+`/cleanup-subagents` closes only idle or done Herdr subagent panes tagged by this extension with `tokens.role`. It leaves active, blocked, unknown, untagged, focused, and out-of-workspace panes alone.
 
 ### `/review`
 
