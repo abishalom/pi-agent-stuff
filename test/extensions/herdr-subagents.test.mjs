@@ -165,7 +165,10 @@ test("CLI adapter reads structured Herdr errors from stderr and retries a newly-
 				};
 			}
 			return {
-				stdout: JSON.stringify({ result: { agent: { pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1", agent_status: "idle" } } }),
+				stdout: JSON.stringify({ result: { agent: {
+					pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1", agent_status: "idle",
+					interactive_ready: true, agent_session: { value: "/tmp/child.jsonl" },
+				} } }),
 				stderr: "",
 				code: 0,
 				killed: false,
@@ -176,6 +179,142 @@ test("CLI adapter reads structured Herdr errors from stderr and retries a newly-
 	const pane = await client.startPi({ paneId: "w1:p2", controlName: "reviewer-w1-p2", args: [], timeoutMs: 1000 });
 	assert.equal(pane.status, "idle");
 	assert.equal(starts, 2);
+});
+
+test("CLI adapter waits for complete Pi session metadata after agent start succeeds", async () => {
+	let starts = 0;
+	let gets = 0;
+	const getTimeouts = [];
+	const pane = (extra = {}) => ({
+		pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1", agent_status: "idle", ...extra,
+	});
+	const pi = {
+		async exec(_command, args, options) {
+			if (args[0] === "agent" && args[1] === "start") {
+				starts += 1;
+				return {
+					stdout: JSON.stringify({ result: { agent: pane({ interactive_ready: false }) } }),
+					stderr: "", code: 0, killed: false,
+				};
+			}
+			if (args[0] === "agent" && args[1] === "get") {
+				gets += 1;
+				getTimeouts.push(options.timeout);
+				if (gets === 1) {
+					return {
+						stdout: "",
+						stderr: JSON.stringify({ error: { code: "agent_not_found", message: "Pi detection is pending" } }),
+						code: 1, killed: false,
+					};
+				}
+				const metadata = gets === 2
+					? { agent_session: { value: "/tmp/path-only.jsonl" } }
+					: gets === 3
+						? { interactive_ready: true }
+						: { interactive_ready: true, agent_session: { value: "/tmp/detected-child.jsonl" } };
+				return {
+					stdout: JSON.stringify({ result: { agent: pane(metadata) } }),
+					stderr: "", code: 0, killed: false,
+				};
+			}
+			throw new Error(`Unexpected Herdr command: ${args.join(" ")}`);
+		},
+	};
+	const client = new CliHerdrClient(pi);
+	const started = await client.startPi({ paneId: "w1:p2", controlName: "reviewer-w1-p2", args: [], timeoutMs: 10000 });
+	assert.equal(started.sessionPath, "/tmp/detected-child.jsonl");
+	assert.equal(started.interactiveReady, true);
+	assert.equal(starts, 1);
+	assert.equal(gets, 4);
+	assert.ok(getTimeouts.every((timeout) => timeout > 0 && timeout <= 5000));
+});
+
+test("CLI adapter bounds missing Pi session metadata by the startup deadline", async () => {
+	let starts = 0;
+	let gets = 0;
+	const pi = {
+		async exec(_command, args, options) {
+			if (args[0] === "agent" && args[1] === "start") {
+				starts += 1;
+				return {
+					stdout: JSON.stringify({ result: { agent: {
+						pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1", agent_status: "idle",
+						interactive_ready: false,
+					} } }),
+					stderr: "", code: 0, killed: false,
+				};
+			}
+			gets += 1;
+			assert.ok(options.timeout > 0 && options.timeout <= 20);
+			return {
+				stdout: "",
+				stderr: JSON.stringify({ error: { code: "agent_not_found", message: "Pi detection is pending" } }),
+				code: 1, killed: false,
+			};
+		},
+	};
+	const client = new CliHerdrClient(pi);
+	await assert.rejects(
+		() => client.startPi({ paneId: "w1:p2", controlName: "reviewer-w1-p2", args: [], timeoutMs: 20 }),
+		/sessionPath=missing, interactiveReady=false, status=idle/,
+	);
+	const getsAtTimeout = gets;
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(gets, getsAtTimeout);
+	assert.equal(starts, 1);
+});
+
+test("CLI adapter aborts session metadata polling without another agent start", async () => {
+	const controller = new AbortController();
+	let starts = 0;
+	let gets = 0;
+	const pi = {
+		async exec(_command, args) {
+			if (args[0] === "agent" && args[1] === "start") {
+				starts += 1;
+				return {
+					stdout: JSON.stringify({ result: { agent: {
+						pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1", agent_status: "idle",
+						interactive_ready: false,
+					} } }),
+					stderr: "", code: 0, killed: false,
+				};
+			}
+			gets += 1;
+			controller.abort(new Error("startup cancelled"));
+			return {
+				stdout: "",
+				stderr: JSON.stringify({ error: { code: "agent_not_found", message: "Pi detection is pending" } }),
+				code: 1, killed: false,
+			};
+		},
+	};
+	const client = new CliHerdrClient(pi);
+	await assert.rejects(
+		() => client.startPi({ paneId: "w1:p2", controlName: "reviewer-w1-p2", args: [], timeoutMs: 10000 }, controller.signal),
+		/startup cancelled/,
+	);
+	assert.equal(starts, 1);
+	assert.equal(gets, 1);
+});
+
+test("CLI adapter rejects startup metadata for a different pane", async () => {
+	const pi = {
+		async exec() {
+			return {
+				stdout: JSON.stringify({ result: { agent: {
+					pane_id: "w1:p9", tab_id: "w1:t9", workspace_id: "w1", agent_status: "idle",
+					interactive_ready: true, agent_session: { value: "/tmp/wrong-child.jsonl" },
+				} } }),
+				stderr: "", code: 0, killed: false,
+			};
+		},
+	};
+	const client = new CliHerdrClient(pi);
+	await assert.rejects(
+		() => client.startPi({ paneId: "w1:p2", controlName: "reviewer-w1-p2", args: [], timeoutMs: 1000 }),
+		/returned pane w1:p9 while starting child pane w1:p2/,
+	);
 });
 
 test("session reader accepts Pi's reserved path before the JSONL file is created", async (t) => {
@@ -528,7 +667,7 @@ class FakeHerdrClient {
 	async renamePane(...args) { this.calls.push(["renamePane", ...args]); }
 	async renameTab(...args) { this.calls.push(["renameTab", ...args]); }
 	async reportRole(...args) { this.calls.push(["reportRole", ...args]); }
-	async startPi(input) { this.calls.push(["startPi", input]); return { paneId: input.paneId, tabId: input.paneId === "w1:p2" ? "w1:t2" : "w1:t1", workspaceId: "w1", status: "idle", sessionPath: this.sessionPath }; }
+	async startPi(input) { this.calls.push(["startPi", input]); return { paneId: input.paneId, tabId: input.paneId === "w1:p2" ? "w1:t2" : "w1:t1", workspaceId: "w1", status: "idle", sessionPath: this.sessionPath, interactiveReady: true }; }
 	async prompt(paneId, message) { this.calls.push(["prompt", paneId, message]); this.status = "working"; return { paneId, tabId: "w1:t2", workspaceId: "w1", status: "working", sessionPath: this.sessionPath, stateChangeSeq: 7 }; }
 	async getAgent(paneId) { return { paneId, tabId: "w1:t2", workspaceId: "w1", status: this.status, sessionPath: this.sessionPath, stateChangeSeq: 7 }; }
 	async getPane(paneId) { return { paneId, tabId: "w1:t2", workspaceId: "w1", status: "unknown" }; }
@@ -630,14 +769,14 @@ test("runtime honors explicit split placement and deterministic direction", asyn
 	runtime.shutdown();
 });
 
-test("startup failure leaves the surface address in the error and removes the private prompt file", async (t) => {
+test("startup metadata timeout leaves the surface address, skips prompting, and removes the private prompt file", async (t) => {
 	const root = await temporaryDirectory();
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const client = new FakeHerdrClient(join(root, "unused.jsonl"));
 	let promptPath;
 	client.startPi = async (input) => {
 		promptPath = input.args[input.args.indexOf("--append-system-prompt") + 1];
-		throw new Error("startup exploded");
+		throw new Error("Herdr started Pi, but sessionPath=missing and interactiveReady=false at the startup deadline");
 	};
 	const runtime = new HerdrSubagentsRuntime(fakePi(), {
 		clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
@@ -645,7 +784,11 @@ test("startup failure leaves the surface address in the error and removes the pr
 	});
 	const ctx = fakeContext();
 	runtime.startSession(ctx);
-	await assert.rejects(() => runtime.launch({ agent: "explorer", task: "inspect" }, ctx), /startup exploded.*w1:p2/);
+	await assert.rejects(
+		() => runtime.launch({ agent: "explorer", task: "inspect" }, ctx),
+		/sessionPath=missing.*interactiveReady=false.*w1:p2/,
+	);
+	assert.equal(client.calls.some(([name]) => name === "prompt"), false);
 	assert.equal(existsSync(promptPath), false);
 	runtime.shutdown();
 });

@@ -106,12 +106,35 @@ export function controlNameFor(role: string, paneId: string): string {
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("aborted"));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(timer);
-      reject(signal.reason ?? new Error("aborted"));
-    }, { once: true });
+      reject(signal?.reason ?? new Error("aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function startupReady(pane: PaneInfo): boolean {
+  return Boolean(pane.sessionPath) && pane.interactiveReady === true;
+}
+
+function startupMetadataError(paneId: string, pane: PaneInfo): Error {
+  const sessionPath = pane.sessionPath ? "present" : "missing";
+  const interactiveReady = pane.interactiveReady === undefined ? "missing" : String(pane.interactiveReady);
+  return new Error(
+    `Herdr started Pi in ${paneId}, but its session metadata did not become available before the startup deadline `
+    + `(sessionPath=${sessionPath}, interactiveReady=${interactiveReady}, status=${pane.status})`,
+  );
+}
+
+function assertTargetPane(pane: PaneInfo, paneId: string, operation: string): void {
+  if (pane.paneId !== paneId) {
+    throw new Error(`Herdr ${operation} returned pane ${pane.paneId} while starting child pane ${paneId}`);
+  }
 }
 
 export class CliHerdrClient implements HerdrClient {
@@ -223,6 +246,7 @@ export class CliHerdrClient implements HerdrClient {
 
   async startPi(input: { paneId: string; controlName: string; args: string[]; timeoutMs: number }, signal?: AbortSignal): Promise<PaneInfo> {
     const deadline = Date.now() + input.timeoutMs;
+    let started: PaneInfo;
     while (true) {
       try {
         const result = this.result(await this.run([
@@ -233,12 +257,34 @@ export class CliHerdrClient implements HerdrClient {
           "--",
           ...input.args,
         ], { signal, timeout: Math.max(1500, deadline - Date.now() + 1000) }));
-        return parsePaneInfo(paneFromResult(result));
+        started = parsePaneInfo(paneFromResult(result));
+        assertTargetPane(started, input.paneId, "agent start");
+        break;
       } catch (error) {
         if (!(error instanceof HerdrCommandError) || error.codeName !== "agent_pane_busy" || Date.now() >= deadline) throw error;
         await abortableDelay(100, signal);
       }
     }
+
+    // agent.start can return before Herdr's Pi detector has attached session
+    // metadata to the pane. Keep the same startup deadline while waiting for
+    // agent.get to expose the JSONL path needed before prompt submission.
+    while (!startupReady(started)) {
+      if (signal?.aborted) throw signal.reason ?? new Error("aborted");
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw startupMetadataError(input.paneId, started);
+      const observed = await this.getAgentWithin(input.paneId, Math.min(5000, remaining), signal);
+      if (observed) {
+        assertTargetPane(observed, input.paneId, "agent get");
+        started = observed;
+      }
+      if (startupReady(started)) break;
+      if (signal?.aborted) throw signal.reason ?? new Error("aborted");
+      const delayMs = Math.min(100, deadline - Date.now());
+      if (delayMs <= 0) throw startupMetadataError(input.paneId, started);
+      await abortableDelay(delayMs, signal);
+    }
+    return started;
   }
 
   async prompt(paneId: string, message: string, signal?: AbortSignal): Promise<PaneInfo> {
@@ -254,14 +300,18 @@ export class CliHerdrClient implements HerdrClient {
     return parsePaneInfo(paneFromResult(result));
   }
 
-  async getAgent(paneId: string, signal?: AbortSignal): Promise<PaneInfo | null> {
+  private async getAgentWithin(paneId: string, timeoutMs: number, signal?: AbortSignal): Promise<PaneInfo | null> {
     try {
-      const result = this.result(await this.run(["agent", "get", paneId], { signal, timeout: 5000 }));
+      const result = this.result(await this.run(["agent", "get", paneId], { signal, timeout: Math.max(1, timeoutMs) }));
       return parsePaneInfo(paneFromResult(result));
     } catch (error) {
       if (error instanceof HerdrCommandError && (error.codeName === "agent_not_found" || error.codeName === "agent_not_running")) return null;
       throw error;
     }
+  }
+
+  async getAgent(paneId: string, signal?: AbortSignal): Promise<PaneInfo | null> {
+    return this.getAgentWithin(paneId, 5000, signal);
   }
 
   async getPane(paneId: string, signal?: AbortSignal): Promise<PaneInfo | null> {
