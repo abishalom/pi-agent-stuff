@@ -114,6 +114,7 @@ export interface LeafPreviewOptions {
 
 export function createLeafPreviewExtension(options: LeafPreviewOptions = {}) {
 	const env = options.env ?? process.env;
+	let activePreviewPaneId: string | undefined;
 
 	return function leafPreviewExtension(pi: ExtensionAPI): void {
 		pi.registerCommand(COMMAND_NAME, {
@@ -133,6 +134,11 @@ export function createLeafPreviewExtension(options: LeafPreviewOptions = {}) {
 				let paneId: string | undefined;
 
 				try {
+					if (activePreviewPaneId) {
+						await runHerdr(pi, ["pane", "close", activePreviewPaneId]).catch(() => {});
+						activePreviewPaneId = undefined;
+					}
+
 					const splitOutput = await runHerdr(pi, [
 						"pane", "split",
 						"--pane", env.HERDR_PANE_ID,
@@ -141,12 +147,14 @@ export function createLeafPreviewExtension(options: LeafPreviewOptions = {}) {
 						"--focus",
 					]);
 					paneId = parseSplitPaneId(splitOutput);
+					activePreviewPaneId = paneId;
 
 					await runHerdr(pi, ["pane", "rename", paneId, "Leaf preview"]);
 					await runHerdr(pi, ["pane", "run", paneId, previewCommand(preview.path, preview.directory)]);
 				} catch (error) {
 					if (paneId) {
 						await runHerdr(pi, ["pane", "close", paneId]).catch(() => {});
+						if (activePreviewPaneId === paneId) activePreviewPaneId = undefined;
 					}
 					await rm(preview.directory, { recursive: true, force: true });
 					throw error;

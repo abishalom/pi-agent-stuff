@@ -14,6 +14,7 @@ import {
 function createFakePi({ leafCode = 0 } = {}) {
 	const commands = new Map();
 	const execCalls = [];
+	let nextPane = 2;
 	return {
 		commands,
 		execCalls,
@@ -24,7 +25,7 @@ function createFakePi({ leafCode = 0 } = {}) {
 			execCalls.push({ command, args });
 			if (command === "leaf") return { code: leafCode, stdout: "", stderr: "" };
 			if (args[0] === "pane" && args[1] === "split") {
-				return { code: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "w1:p2" } } }), stderr: "" };
+				return { code: 0, stdout: JSON.stringify({ result: { pane: { pane_id: `w1:p${nextPane++}` } } }), stderr: "" };
 			}
 			return { code: 0, stdout: "", stderr: "" };
 		},
@@ -79,6 +80,22 @@ test("/leaf creates a focused temporary Herdr split running Leaf", async () => {
 	assert.match(shell, /rm -rf -- '/);
 	assert.match(shell, /exit "\$status"$/);
 	await rm(dirname(pathMatch[1]), { recursive: true, force: true });
+});
+
+test("/leaf closes the prior preview split before opening a replacement", async () => {
+	const pi = createFakePi();
+	createLeafPreviewExtension({ env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" } })(pi);
+
+	await pi.commands.get("leaf").handler("", context());
+	await pi.commands.get("leaf").handler("", context());
+
+	assert.deepEqual(pi.execCalls[5], { command: "herdr", args: ["pane", "close", "w1:p2"] });
+	assert.deepEqual(pi.execCalls[6].args.slice(0, 3), ["pane", "split", "--pane"]);
+	assert.equal(pi.execCalls[7].args[2], "w1:p3");
+	for (const call of pi.execCalls.filter(({ args }) => args[0] === "pane" && args[1] === "run")) {
+		const pathMatch = call.args[3].match(/^leaf -- '([^']+)';/);
+		await rm(dirname(pathMatch[1]), { recursive: true, force: true });
+	}
 });
 
 test("/leaf reports a missing Leaf installation before creating a split", async () => {

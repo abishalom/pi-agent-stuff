@@ -145,4 +145,4 @@ The extension rejects launches outside the Pi TUI or outside Herdr. Direct non-s
 
 ## `/leaf`
 
-`/leaf [right|down]` writes the latest complete assistant response to a private temporary Markdown file and opens it in Leaf in a focused Herdr split (`right` is the default). Quit Leaf with `q`; its shell exits, the preview split closes, and the temporary file is removed. This command requires Pi to run in a Herdr pane and Leaf to be on `PATH`.
+`/leaf [right|down]` writes the latest complete assistant response to a private temporary Markdown file and opens it in Leaf in a focused Herdr split (`right` is the default). A new `/leaf` closes the prior preview split first. Quit Leaf with `q`; its shell exits, the preview split closes, and the temporary file is removed. This command requires Pi to run in a Herdr pane and Leaf to be on `PATH`.
