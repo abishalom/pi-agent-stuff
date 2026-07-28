@@ -17,7 +17,8 @@
       "./pi-extension/mitsupi/files.ts",
       "./pi-extension/herdr-subagents/index.ts",
       "./pi-extension/diff-review/index.ts",
-      "./pi-extension/history-recall/index.ts"
+      "./pi-extension/history-recall/index.ts",
+      "./pi-extension/leaf-preview/index.ts"
     ],
     "skills": [
       "./skills",

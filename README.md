@@ -10,6 +10,7 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/herdr-subagents` — persistent interactive Pi children hosted natively by Herdr
+- `pi-extension/leaf-preview` — opens the latest assistant response in Leaf in a temporary Herdr split
 - `prompts/review.md` — parallel standards/requirements review in a shared Hunk session
 - `prompts/cleanup-subagents.md` — close finished, role-tagged Herdr subagent panes
 - `skills/` and `prompts/` — local reusable Pi resources
@@ -141,3 +142,7 @@ herdr integration install pi
 ```
 
 The extension rejects launches outside the Pi TUI or outside Herdr. Direct non-subagent Pi usage is unaffected.
+
+## `/leaf`
+
+`/leaf [right|down]` writes the latest complete assistant response to a private temporary Markdown file and opens it in Leaf in a focused Herdr split (`right` is the default). Quit Leaf with `q`; its shell exits, the preview split closes, and the temporary file is removed. This command requires Pi to run in a Herdr pane and Leaf to be on `PATH`.
