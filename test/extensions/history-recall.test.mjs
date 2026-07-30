@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import historyRecall, { bounded, chunkText, extractDocuments, historicalContext, HistoryIndex } from "../../pi-extension/history-recall/index.ts";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const header = { type: "session", version: 3, id: "session-a", timestamp: "2025-01-01T00:00:00.000Z", cwd: "/fixture" };
 const line = (value) => JSON.stringify(value);
@@ -114,68 +116,84 @@ test("legacy v1 sessions use stable source ordinals without rewriting the source
  assert.equal(await import("node:fs/promises").then(({ readFile }) => readFile(path, "utf8")), raw);
 });
 
-test("refresh uses /resume current-folder inputs, excludes active sessions, and refreshes changed/deleted files", async () => {
+test("refresh discovers only current-folder sessions, excludes active sessions, and refreshes changed/deleted files", async () => {
  const directory = mkdtempSync(join(tmpdir(), "history-recall-cache-"));
- const active = join(directory, "active.jsonl"), other = join(directory, "other.jsonl");
+ const active = join(directory, "active.jsonl"), other = join(directory, "other.jsonl"), foreign = join(directory, "foreign.jsonl");
  writeFileSync(active, fixture([{ type: "message", id: "active", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "active-only" } }]));
  writeFileSync(other, fixture([{ type: "message", id: "other", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "old-word" } }]));
- const original = SessionManager.list, calls = [];
- let sessions = [{ path: active }, { path: other }];
- SessionManager.list = async (...args) => { calls.push(args); return sessions; };
- try {
-  const index = new HistoryIndex();
-  await index.refresh({ cwd: "/current", sessionDir: directory, activeFile: active });
-  assert.deepEqual(calls[0].slice(0, 2), ["/current", directory]);
-  assert.equal(index.search("active-only").length, 0);
-  assert.equal(index.search("old-word").length, 1);
-  writeFileSync(other, fixture([{ type: "message", id: "other", parentId: null, timestamp: "2025-01-01T00:00:03.000Z", message: { role: "user", content: "fresh-word" } }]));
-  await index.refresh({ cwd: "/current", sessionDir: directory, activeFile: active });
-  assert.equal(index.search("old-word").length, 0);
-  assert.equal(index.search("fresh-word").length, 1);
-  sessions = [];
-  await index.refresh({ cwd: "/current", sessionDir: directory, activeFile: active });
-  assert.equal(index.search("fresh-word").length, 0);
- } finally { SessionManager.list = original; }
+ writeFileSync(foreign, fixture([{ type: "message", id: "foreign", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "foreign-only" } }]).replace('"cwd":"/fixture"', '"cwd":"/elsewhere"'));
+ const index = new HistoryIndex();
+ await index.refresh({ cwd: "/fixture", sessionDir: directory, activeFile: active });
+ assert.equal(index.search("active-only").length, 0);
+ assert.equal(index.search("foreign-only").length, 0);
+ assert.equal(index.search("old-word").length, 1);
+ writeFileSync(other, fixture([{ type: "message", id: "other", parentId: null, timestamp: "2025-01-01T00:00:03.000Z", message: { role: "user", content: "fresh-word" } }]));
+ await index.refresh({ cwd: "/fixture", sessionDir: directory, activeFile: active, force: true });
+ assert.equal(index.search("old-word").length, 0);
+ assert.equal(index.search("fresh-word").length, 1);
+ await import("node:fs/promises").then(({ unlink }) => unlink(other));
+ await index.refresh({ cwd: "/fixture", sessionDir: directory, activeFile: active, force: true });
+ assert.equal(index.search("fresh-word").length, 0);
 });
 
-test("concurrent refreshes are serialized and publish cache state without temp-file collisions", async () => {
+test("warm refreshes honor the TTL, skip no-op cache writes, and avoid duplicated MiniSearch documents", async () => {
+ const directory = mkdtempSync(join(tmpdir(), "history-recall-ttl-"));
+ const path = join(directory, "other.jsonl");
+ writeFileSync(path, fixture([{ type: "message", id: "m", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "ttl-word" } }]));
+ let discoveries = 0;
+ const discoverFiles = async () => { discoveries++; const info = await stat(path); return [{ path, mtimeMs: info.mtimeMs, size: info.size }]; };
+ const cwd = "/ttl", key = createHash("sha256").update(`${cwd}\0${directory}`).digest("hex");
+ const indexPath = join(getAgentDir(), "cache", "history-recall", `${key}.index.json`);
+ const index = new HistoryIndex({ discoverFiles, refreshTtlMs: 60_000 });
+ await index.refresh({ cwd, sessionDir: directory });
+ const serialized = JSON.parse(await readFile(indexPath, "utf8"));
+ assert.deepEqual(serialized.storedFields, {});
+ const before = (await stat(indexPath)).mtimeMs;
+ await index.refresh({ cwd, sessionDir: directory });
+ assert.equal(discoveries, 1);
+ await new Promise((resolve) => setTimeout(resolve, 20));
+ await index.refresh({ cwd, sessionDir: directory, force: true });
+ assert.equal(discoveries, 2);
+ assert.equal((await stat(indexPath)).mtimeMs, before);
+ const restored = new HistoryIndex({ discoverFiles });
+ await restored.refresh({ cwd, sessionDir: directory });
+ assert.equal(restored.search("ttl-word").length, 1);
+ assert.equal((await stat(indexPath)).mtimeMs, before);
+});
+
+test("concurrent forced refreshes are serialized and publish cache state without temp-file collisions", async () => {
  const directory = mkdtempSync(join(tmpdir(), "history-recall-concurrent-"));
  const path = join(directory, "other.jsonl");
  writeFileSync(path, fixture([{ type: "message", id: "m", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "parallel-word" } }]));
- const original = SessionManager.list, originalNow = Date.now;
- let inFlight = 0, maximum = 0;
- SessionManager.list = async () => {
-  maximum = Math.max(maximum, ++inFlight);
+ let inFlight = 0, maximum = 0, calls = 0;
+ const discoverFiles = async () => {
+  calls++; maximum = Math.max(maximum, ++inFlight);
   await new Promise((resolve) => setTimeout(resolve, 15));
   inFlight--;
-  return [{ path }];
+  const info = await stat(path);
+  return [{ path, mtimeMs: info.mtimeMs, size: info.size }];
  };
- Date.now = () => 1;
- try {
-  const index = new HistoryIndex();
-  await Promise.all([index.refresh({ cwd: "/concurrent", sessionDir: directory }), index.refresh({ cwd: "/concurrent", sessionDir: directory })]);
-  assert.equal(maximum, 1);
-  assert.equal(index.search("parallel-word").length, 1);
- } finally { SessionManager.list = original; Date.now = originalNow; }
+ const index = new HistoryIndex({ discoverFiles });
+ await Promise.all([index.refresh({ cwd: "/concurrent", sessionDir: directory, force: true }), index.refresh({ cwd: "/concurrent", sessionDir: directory, force: true })]);
+ assert.equal(maximum, 1); assert.equal(calls, 2);
+ assert.equal(index.search("parallel-word").length, 1);
 });
 
 test("aborted queued refresh never runs or publishes after the active serialized refresh", async () => {
  const directory = mkdtempSync(join(tmpdir(), "history-recall-abort-refresh-"));
  const path = join(directory, "other.jsonl");
  writeFileSync(path, fixture([{ type: "message", id: "m", parentId: null, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "user", content: "published-word" } }]));
- const original = SessionManager.list; let calls = 0, release;
- SessionManager.list = async () => { calls++; await new Promise((resolve) => { release = resolve; }); return [{ path }]; };
- try {
-  const index = new HistoryIndex();
-  const first = index.refresh({ cwd: "/abort-serialized", sessionDir: directory });
-  while (!release) await new Promise((resolve) => setImmediate(resolve));
-  const controller = new AbortController();
-  const second = index.refresh({ cwd: "/abort-serialized", sessionDir: directory, signal: controller.signal });
-  controller.abort(); await assert.rejects(second, /cancelled/);
-  release(); await first;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls, 1); assert.equal(index.search("published-word").length, 1);
- } finally { SessionManager.list = original; }
+ let calls = 0, release;
+ const discoverFiles = async () => { calls++; await new Promise((resolve) => { release = resolve; }); const info = await stat(path); return [{ path, mtimeMs: info.mtimeMs, size: info.size }]; };
+ const index = new HistoryIndex({ discoverFiles });
+ const first = index.refresh({ cwd: "/abort-serialized", sessionDir: directory });
+ while (!release) await new Promise((resolve) => setImmediate(resolve));
+ const controller = new AbortController();
+ const second = index.refresh({ cwd: "/abort-serialized", sessionDir: directory, signal: controller.signal, force: true });
+ controller.abort(); await assert.rejects(second, /cancelled/);
+ release(); await first;
+ await new Promise((resolve) => setImmediate(resolve));
+ assert.equal(calls, 1); assert.equal(index.search("published-word").length, 1);
 });
 
 test("cyclic parent data returns malformed context instead of looping", async () => {
@@ -194,6 +212,35 @@ function fakePi() {
  const commands = new Map(), tools = new Map(), handlers = new Map(), sent = [], active = ["read"], setCalls = [];
  return { commands, tools, handlers, sent, setCalls, getActiveTools: () => active, setActiveTools: (next) => { setCalls.push([...next]); active.splice(0, active.length, ...next); }, registerTool: (tool) => { tools.set(tool.name, tool); active.push(tool.name); }, registerCommand: (name, command) => commands.set(name, command), on: (name, handler) => handlers.set(name, handler), sendUserMessage: (text) => sent.push(text) };
 }
+test("a recall search refreshes once and citation reads use that snapshot", async () => {
+ const directory = mkdtempSync(join(tmpdir(), "history-recall-one-refresh-"));
+ const path = join(directory, "chat.jsonl"), raw = fixture([
+  { type: "message", id: "u", parentId: null, timestamp: "2025-01-01T00:00:01.000Z", message: { role: "user", content: "snapshot question" } },
+  { type: "message", id: "a", parentId: "u", timestamp: "2025-01-01T00:00:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "snapshot answer" }] } },
+ ]);
+ writeFileSync(path, raw);
+ const document = extractDocuments(path, raw)[0];
+ const originalRefresh = HistoryIndex.prototype.refresh, originalSearch = HistoryIndex.prototype.search, originalGet = HistoryIndex.prototype.get;
+ let refreshes = 0;
+ HistoryIndex.prototype.refresh = async () => { refreshes++; };
+ HistoryIndex.prototype.search = () => [document];
+ HistoryIndex.prototype.get = () => document;
+ try {
+  const pi = fakePi(); historyRecall(pi);
+  const commandCtx = { isIdle: () => true, ui: { notify() {} } };
+  await pi.commands.get("recall").handler("snapshot?", commandCtx);
+  await pi.handlers.get("before_agent_start")({ prompt: pi.sent[0] }, commandCtx);
+  await pi.handlers.get("agent_start")({}, commandCtx);
+  const toolCtx = { sessionManager: { getCwd: () => "/fixture", getSessionDir: () => directory, getSessionFile: () => undefined } };
+  await pi.tools.get("history_search").execute("search", { query: "snapshot" }, undefined, undefined, toolCtx);
+  const result = await pi.tools.get("history_read").execute("read", { resultId: document.id }, undefined, undefined, toolCtx);
+  assert.equal(refreshes, 1); assert.match(result.content[0].text, /snapshot answer/);
+  await pi.handlers.get("agent_settled")({}, commandCtx);
+ } finally {
+  HistoryIndex.prototype.refresh = originalRefresh; HistoryIndex.prototype.search = originalSearch; HistoryIndex.prototype.get = originalGet;
+ }
+});
+
 test("/recall avoids runtime actions while loading, activates only for its acknowledged turn, and deactivates when settled", async () => {
  const pi = fakePi(); historyRecall(pi);
  assert.equal(pi.setCalls.length, 0);

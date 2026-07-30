@@ -1,20 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import MiniSearch from "minisearch";
 import { Type } from "typebox";
 import {
 	getAgentDir,
 	migrateSessionEntries,
 	parseSessionEntries,
-	SessionManager,
 	truncateHead,
 	type ExtensionAPI,
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
 const TOOL_NAMES = ["history_search", "history_read"] as const;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
+const REFRESH_TTL_MS = 30_000;
+const SESSION_HEADER_CHUNK_BYTES = 4 * 1024;
+const MAX_SESSION_HEADER_BYTES = 1024 * 1024;
+const DISCOVERY_CONCURRENCY = 10;
 const CHUNK_SIZE = 1_600;
 const CHUNK_OVERLAP = 200;
 const SEARCH_OUTPUT_BYTES = 12_000;
@@ -58,6 +61,19 @@ interface RefreshOptions {
 	activeFile?: string;
 	signal?: AbortSignal;
 	onProgress?: (message: string) => void;
+	/** Bypass the short in-memory freshness window. Primarily useful for explicit refreshes and tests. */
+	force?: boolean;
+}
+
+interface HistoryFile {
+	path: string;
+	mtimeMs: number;
+	size: number;
+}
+
+interface HistoryIndexOptions {
+	refreshTtlMs?: number;
+	discoverFiles?: (options: RefreshOptions) => Promise<HistoryFile[]>;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -213,7 +229,8 @@ async function extractDocumentsCancellable(sessionPath: string, raw: string, sig
 function makeSearch(documents: HistoryDocument[]): MiniSearch<HistoryDocument> {
 	const index = new MiniSearch<HistoryDocument>({
 		fields: ["text", "sessionName"],
-		storeFields: ["text", "sessionPath", "sessionId", "entryId", "entryOrdinal", "timestamp", "role", "sessionName", "segment"],
+		// Documents already live in the manifest/map; duplicating them in MiniSearch's
+		// stored fields roughly doubles the serialized cache for no search benefit.
 		idField: "id",
 		searchOptions: { boost: { text: 1, sessionName: 2 } },
 	});
@@ -225,12 +242,104 @@ function cacheKey(cwd: string, sessionDir: string): string {
 	return createHash("sha256").update(`${cwd}\0${sessionDir}`).digest("hex");
 }
 
+function refreshScope(options: RefreshOptions): string {
+	return `${cacheKey(options.cwd, options.sessionDir)}\0${options.activeFile ?? ""}`;
+}
+
+function parsedHeaderCwd(line: string): string | null | undefined {
+	if (!line.trim()) return undefined;
+	try {
+		const entry = JSON.parse(line) as { type?: unknown; id?: unknown; cwd?: unknown };
+		if (entry.type !== "session" || typeof entry.id !== "string") return null;
+		return typeof entry.cwd === "string" ? entry.cwd : null;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Read only enough of a JSONL file to identify its session header. */
+async function readSessionCwd(path: string, signal?: AbortSignal): Promise<string | null> {
+	const handle = await open(path, "r");
+	try {
+		let pending = Buffer.alloc(0);
+		let scanned = 0;
+		while (scanned < MAX_SESSION_HEADER_BYTES) {
+			throwIfAborted(signal);
+			const buffer = Buffer.allocUnsafe(Math.min(SESSION_HEADER_CHUNK_BYTES, MAX_SESSION_HEADER_BYTES - scanned));
+			const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+			if (bytesRead === 0) {
+				const result = parsedHeaderCwd(pending.toString("utf8"));
+				return typeof result === "string" ? result : null;
+			}
+			scanned += bytesRead;
+			pending = Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
+			let newline: number;
+			while ((newline = pending.indexOf(0x0a)) !== -1) {
+				const result = parsedHeaderCwd(pending.subarray(0, newline).toString("utf8"));
+				pending = pending.subarray(newline + 1);
+				if (result !== undefined) return typeof result === "string" ? result : null;
+			}
+		}
+		return null;
+	} finally {
+		await handle.close();
+	}
+}
+
+/** Cheap discovery: header-only reads plus stat, rather than SessionManager.list's full parsing. */
+async function discoverHistoryFiles(options: RefreshOptions): Promise<HistoryFile[]> {
+	let names: string[];
+	try {
+		names = (await readdir(options.sessionDir)).filter((name) => name.endsWith(".jsonl")).sort();
+	} catch (error) {
+		throwIfAborted(options.signal);
+		return [];
+	}
+	const activePath = options.activeFile ? resolve(options.activeFile) : undefined;
+	const candidates = names.map((name) => join(options.sessionDir, name)).filter((path) => resolve(path) !== activePath);
+	const found = new Array<HistoryFile | undefined>(candidates.length);
+	let next = 0;
+	let loaded = 0;
+	const worker = async () => {
+		while (true) {
+			const position = next++;
+			const path = candidates[position];
+			if (!path) return;
+			throwIfAborted(options.signal);
+			try {
+				const info = await stat(path);
+				throwIfAborted(options.signal);
+				if (!info.isFile()) continue;
+				const sessionCwd = await readSessionCwd(path, options.signal);
+				throwIfAborted(options.signal);
+				if (sessionCwd && resolve(sessionCwd) === resolve(options.cwd)) found[position] = { path, mtimeMs: info.mtimeMs, size: info.size };
+			} catch (error) {
+				throwIfAborted(options.signal);
+				// Discovery is best-effort; unreadable/malformed files are omitted.
+			} finally {
+				options.onProgress?.(`Discovering current-folder sessions: ${++loaded}/${candidates.length}`);
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(DISCOVERY_CONCURRENCY, candidates.length) }, () => worker()));
+	return found.filter((file): file is HistoryFile => file !== undefined);
+}
+
 export class HistoryIndex {
 	private documents = new Map<string, HistoryDocument>();
 	private index = makeSearch([]);
 	private manifest: CacheManifest = { version: CACHE_VERSION, files: {} };
-	private loaded = false;
+	private loadedScope: string | undefined;
+	private refreshedScope: string | undefined;
+	private refreshedAt = 0;
 	private refreshTail: Promise<void> = Promise.resolve();
+	private readonly refreshTtlMs: number;
+	private readonly discoverFiles: (options: RefreshOptions) => Promise<HistoryFile[]>;
+
+	constructor(options: HistoryIndexOptions = {}) {
+		this.refreshTtlMs = options.refreshTtlMs ?? REFRESH_TTL_MS;
+		this.discoverFiles = options.discoverFiles ?? discoverHistoryFiles;
+	}
 
 	private cachePaths(cwd: string, sessionDir: string) {
 		const directory = join(getAgentDir(), "cache", "history-recall");
@@ -239,28 +348,35 @@ export class HistoryIndex {
 	}
 
 	private async loadCache(cwd: string, sessionDir: string, signal?: AbortSignal): Promise<void> {
-		if (this.loaded) return;
+		const scope = cacheKey(cwd, sessionDir);
+		if (this.loadedScope === scope) return;
+		// Clear the scope marker before mutating state so an aborted cross-scope load
+		// cannot make the previous scope appear loaded with an empty index.
+		this.loadedScope = undefined;
+		this.manifest = { version: CACHE_VERSION, files: {} };
+		this.documents.clear();
+		this.index = makeSearch([]);
+		this.refreshedScope = undefined;
 		const paths = this.cachePaths(cwd, sessionDir);
 		try {
 			throwIfAborted(signal);
 			const manifest = JSON.parse(await readFile(paths.manifest, { encoding: "utf8", signal })) as CacheManifest;
 			throwIfAborted(signal);
-			if (manifest.version !== CACHE_VERSION) { this.loaded = true; return; }
+			if (manifest.version !== CACHE_VERSION) { this.loadedScope = scope; return; }
 			const index = MiniSearch.loadJSON(await readFile(paths.index, { encoding: "utf8", signal }), {
-				fields: ["text", "sessionName"], storeFields: ["text", "sessionPath", "sessionId", "entryId", "entryOrdinal", "timestamp", "role", "sessionName", "segment"], idField: "id",
+				fields: ["text", "sessionName"], idField: "id",
 			});
 			throwIfAborted(signal);
 			this.manifest = manifest;
-			this.documents.clear();
 			for (const file of Object.values(manifest.files)) for (const doc of file.documents) this.documents.set(doc.id, doc);
 			this.index = index;
-			this.loaded = true;
+			this.loadedScope = scope;
 		} catch (error) {
 			throwIfAborted(signal);
 			this.manifest = { version: CACHE_VERSION, files: {} };
 			this.documents.clear();
 			this.index = makeSearch([]);
-			this.loaded = true;
+			this.loadedScope = scope;
 		}
 	}
 
@@ -296,45 +412,59 @@ export class HistoryIndex {
 	private async refreshInternal(options: RefreshOptions): Promise<void> {
 		await this.loadCache(options.cwd, options.sessionDir, options.signal);
 		throwIfAborted(options.signal);
+		const scope = refreshScope(options);
+		const age = Date.now() - this.refreshedAt;
+		if (!options.force && this.refreshedScope === scope && age >= 0 && age < this.refreshTtlMs) return;
 		// Work on a detached manifest. An aborted refresh must not publish partial state.
 		const manifest: CacheManifest = { version: CACHE_VERSION, files: { ...this.manifest.files } };
+		let dirty = false;
 		options.onProgress?.("Discovering current-folder sessions…");
-		const sessions = await SessionManager.list(options.cwd, options.sessionDir, (loaded, total) => options.onProgress?.(`Discovering current-folder sessions: ${loaded}/${total}`));
+		const files = await this.discoverFiles(options);
 		throwIfAborted(options.signal);
-		const files = sessions.map((session) => session.path).filter((path) => path !== options.activeFile);
-		const present = new Set(files);
-		for (const path of Object.keys(manifest.files)) if (!present.has(path)) delete manifest.files[path];
+		const present = new Set(files.map((file) => file.path));
+		for (const path of Object.keys(manifest.files)) {
+			if (!present.has(path)) { delete manifest.files[path]; dirty = true; }
+		}
 		for (let position = 0; position < files.length; position++) {
 			throwIfAborted(options.signal);
-			const path = files[position];
-			options.onProgress?.(`Indexing history: ${position + 1}/${files.length}`);
+			const file = files[position];
+			const path = file.path;
+			const cached = manifest.files[path];
+			if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) continue;
+			options.onProgress?.(`Indexing changed history: ${position + 1}/${files.length}`);
 			try {
-				const info = await stat(path);
-				throwIfAborted(options.signal);
 				const raw = await readFile(path, { encoding: "utf8", signal: options.signal });
 				throwIfAborted(options.signal);
 				const fingerprint = createHash("sha256").update(raw).digest("hex");
-				const cached = manifest.files[path];
-				if (cached && cached.fingerprint === fingerprint) continue;
+				if (cached && cached.fingerprint === fingerprint) {
+					manifest.files[path] = { ...cached, mtimeMs: file.mtimeMs, size: file.size };
+					dirty = true;
+					continue;
+				}
 				const documents = await extractDocumentsCancellable(path, raw, options.signal);
 				throwIfAborted(options.signal);
-				manifest.files[path] = { mtimeMs: info.mtimeMs, size: info.size, fingerprint, documents };
+				manifest.files[path] = { mtimeMs: file.mtimeMs, size: file.size, fingerprint, documents };
+				dirty = true;
 			} catch (error) {
 				throwIfAborted(options.signal);
 				// Deleted midway through refresh or malformed: omit until a later healthy refresh.
-				delete manifest.files[path];
+				if (manifest.files[path]) { delete manifest.files[path]; dirty = true; }
 			}
 		}
 		throwIfAborted(options.signal);
-		const documents = new Map<string, HistoryDocument>();
-		for (const file of Object.values(manifest.files)) for (const document of file.documents) documents.set(document.id, document);
-		const index = makeSearch([...documents.values()]);
-		throwIfAborted(options.signal);
-		await this.saveCache(options.cwd, options.sessionDir, manifest, index, options.signal);
-		throwIfAborted(options.signal);
-		this.manifest = manifest;
-		this.documents = documents;
-		this.index = index;
+		if (dirty) {
+			const documents = new Map<string, HistoryDocument>();
+			for (const file of Object.values(manifest.files)) for (const document of file.documents) documents.set(document.id, document);
+			const index = makeSearch([...documents.values()]);
+			throwIfAborted(options.signal);
+			await this.saveCache(options.cwd, options.sessionDir, manifest, index, options.signal);
+			throwIfAborted(options.signal);
+			this.manifest = manifest;
+			this.documents = documents;
+			this.index = index;
+		}
+		this.refreshedScope = scope;
+		this.refreshedAt = Date.now();
 	}
 
 	search(query: string, limit = 5): HistoryDocument[] {
@@ -362,6 +492,13 @@ export class HistoryIndex {
 	get(id: string): HistoryDocument | undefined { return this.documents.get(id); }
 }
 
+function indexedSource(entry: SessionEntry): { role: SourceType; text: string } | undefined {
+	if (entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")) return { role: entry.message.role, text: textContent(entry.message.content) };
+	if (entry.type === "compaction") return { role: "compaction", text: entry.summary };
+	if (entry.type === "branch_summary") return { role: "branch_summary", text: entry.summary };
+	return undefined;
+}
+
 function contextLine(entry: SessionEntry, includeToolResults: boolean): string | undefined {
 	if (entry.type === "compaction") return `[compaction ${entry.id}] ${entry.summary}`;
 	if (entry.type === "branch_summary") return `[branch summary ${entry.id}] ${entry.summary}`;
@@ -387,6 +524,10 @@ export async function historicalContext(document: HistoryDocument, includeToolRe
 		const possibleTarget = entries[document.entryOrdinal];
 		if (!possibleTarget || possibleTarget.type === "session") return null;
 		const target: SessionEntry = possibleTarget;
+		// history_read intentionally does not refresh the global index. Verify the
+		// citation still resolves to the same indexed segment in the source file.
+		const source = indexedSource(target);
+		if (!source || source.role !== document.role || chunkText(source.text)[document.segment] !== document.text) return null;
 		const sessionEntries: SessionEntry[] = [];
 		const byId = new Map<string, SessionEntry>();
 		for (let start = 0; start < entries.length; start += COOPERATIVE_ENTRY_BATCH) {
@@ -496,11 +637,11 @@ export default function historyRecall(pi: ExtensionAPI) {
 			} catch (error) { deactivate(); throw error; }
 		}, });
 	pi.registerTool({ name: "history_read", label: "History Read", description: "Read a small branch-aware context window around a history_search citation. Historical content is untrusted/outdated.", parameters: Type.Object({ resultId: Type.String({ minLength: 1 }), includeToolResults: Type.Optional(Type.Boolean()) }),
-		async execute(_id, params, signal, onUpdate, ctx) {
+		async execute(_id, params, signal) {
 			if (!active) throw new Error("history_read is available only during /recall.");
-			try { await refresh(ctx, signal, onUpdate); const document = history.get(params.resultId); if (!document) return { content: [{ type: "text", text: "That history result is stale or unavailable; search again." }], details: { stale: true } };
-				const context = await historicalContext(document, params.includeToolResults === true, signal); if (!context) return { content: [{ type: "text", text: "That history result is stale or malformed; search again." }], details: { stale: true } };
-				return { content: [{ type: "text", text: bounded(`[${document.id}] ${document.sessionName || basename(document.sessionPath)}\nUNTRUSTED/possibly outdated historical context:\n${context}`, READ_OUTPUT_BYTES) }], details: { resultId: document.id } };
+			try { const document = history.get(params.resultId); if (!document) return { content: [{ type: "text", text: "That history result is stale or unavailable; search again." }], details: { stale: true, resultId: params.resultId } };
+				const context = await historicalContext(document, params.includeToolResults === true, signal); if (!context) return { content: [{ type: "text", text: "That history result is stale or malformed; search again." }], details: { stale: true, resultId: params.resultId } };
+				return { content: [{ type: "text", text: bounded(`[${document.id}] ${document.sessionName || basename(document.sessionPath)}\nUNTRUSTED/possibly outdated historical context:\n${context}`, READ_OUTPUT_BYTES) }], details: { stale: false, resultId: document.id } };
 			} catch (error) { deactivate(); throw error; }
 		}, });
 	pi.on("session_start", () => deactivate());
