@@ -498,6 +498,32 @@ test("delivery scheduler coalesces events and waits for parent settlement", asyn
 	scheduler.shutdown();
 });
 
+test("subagent launch instructs the parent to yield instead of polling", async () => {
+	const tools = new Map();
+	registerSubagentsUI({
+		registerTool(tool) { tools.set(tool.name, tool); },
+		registerCommand() {},
+	}, {
+		getCatalog() { return { definitions: [], diagnostics: [], get() {} }; },
+		async launch() {
+			return {
+				label: "[E] Explorer: inspect", placement: "tab", paneId: "w1:p2", tabId: "w1:t2",
+				agentName: "explorer", model: "p/m", thinking: "low", sessionPath: "/tmp/child.jsonl",
+			};
+		},
+		async followup() {},
+		async interrupt() {},
+		async getResult() {},
+	});
+	const tool = tools.get("subagent");
+	assert.match(tool.description, /end the current turn immediately/i);
+	assert.match(tool.description, /do not poll with sleep, herdr pane read, or loops/i);
+	assert.match(tool.promptSnippet, /finish this turn/i);
+	assert.match(tool.promptSnippet, /child emits a handoff/i);
+	const result = await tool.execute("call", { agent: "explorer", task: "Inspect the code" }, undefined, undefined, {});
+	assert.match(result.content[0].text, /Do not poll; finish this turn\. You will be resumed automatically when the child emits a handoff\./);
+});
+
 test("get_subagent_result exposes bounded content once without copying response text into details", async () => {
 	const tools = new Map();
 	const pi = {

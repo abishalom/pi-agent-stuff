@@ -134,8 +134,8 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
   pi.registerTool({
     name: "subagent",
     label: "Launch Subagent",
-    description: "Launch a persistent interactive Pi child in a Herdr tab (default) or split. The call waits for startup and task submission, not completion. Children share the current checkout; avoid concurrent writers.",
-    promptSnippet: "Launch a persistent Herdr-hosted Pi subagent",
+    description: "Launch a persistent interactive Pi child in a Herdr tab (default) or split. The call waits for startup and task submission, not completion. After launch, end the current turn immediately; do not poll with sleep, herdr pane read, or loops. You will be resumed automatically when the child emits a handoff. Children share the current checkout; avoid concurrent writers.",
+    promptSnippet: "Launch a persistent Herdr-hosted Pi subagent. After launching, do not poll with sleep, herdr pane read, or loops; finish this turn. You will be resumed automatically when the child emits a handoff.",
     parameters: Type.Object({
       agent: Type.String({ description: "Resolved agent role name" }),
       task: Type.String({ description: "Initial task for the child" }),
@@ -146,7 +146,7 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
       if (signal?.aborted) throw new Error("Subagent launch cancelled");
       const child = await controller.launch({ ...params, signal }, ctx);
       return toolResult(
-        `Started ${child.label} in ${child.placement} ${child.paneId}. The child is running asynchronously and remains directly interactive.`,
+        `Started ${child.label} in ${child.placement} ${child.paneId}. The child is running asynchronously and remains directly interactive. Do not poll; finish this turn. You will be resumed automatically when the child emits a handoff.`,
         {
           paneId: child.paneId,
           tabId: child.tabId,
