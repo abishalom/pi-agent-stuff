@@ -3,7 +3,32 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import type { DeliveryEvent } from "./types.ts";
 
 export const DELIVERY_CUSTOM_TYPE = "herdr-subagent-events";
-export const MAX_PARENT_MESSAGE_BYTES = 50 * 1024;
+export const MAX_PARENT_MESSAGE_BYTES = 16 * 1024;
+export const MAX_AUTOMATIC_HANDOFF_BYTES = 6 * 1024;
+
+interface ContextMessageShape {
+  role?: string;
+  customType?: string;
+  stopReason?: string;
+}
+
+function isSuccessfulAssistantStop(message: ContextMessageShape): boolean {
+  return message.role === "assistant" && message.stopReason === "stop";
+}
+
+/** Keep a handoff for the run that consumes it, then omit it from later model calls. */
+export function pruneDigestedDeliveryMessages<T extends ContextMessageShape>(messages: T[]): T[] {
+  let hasLaterSuccessfulAssistant = false;
+  const kept: T[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "custom" && message.customType === DELIVERY_CUSTOM_TYPE && hasLaterSuccessfulAssistant) continue;
+    kept.push(message);
+    if (isSuccessfulAssistantStop(message)) hasLaterSuccessfulAssistant = true;
+  }
+  kept.reverse();
+  return kept;
+}
 
 interface RenderEvent extends Omit<DeliveryEvent, "text" | "errorMessage"> {
   contentStart: number;
@@ -64,15 +89,16 @@ export function buildDeliveryMessage(events: DeliveryEvent[], maximumBytes = MAX
       ? "The child is blocked and may need direct interaction in its Herdr pane."
       : `Child state changed to ${event.kind}.`);
     const availableBody = Math.max(0, remaining - prefixBytes);
-    const initialBody = truncateUtf8(rawBody, availableBody);
+    const handoffBytes = Math.min(availableBody, MAX_AUTOMATIC_HANDOFF_BYTES);
+    const initialBody = truncateUtf8(rawBody, handoffBytes);
     let bodyText = initialBody.text;
     if (initialBody.truncated) {
-      const truncationNote = "\n[Truncated in parent message; full response remains in the child session JSONL.]";
+      const truncationNote = "\n[Compact handoff truncated; use get_subagent_result for the full response.]";
       const noteBytes = Buffer.byteLength(truncationNote, "utf8");
-      if (noteBytes <= availableBody) {
-        bodyText = truncateUtf8(rawBody, availableBody - noteBytes).text + truncationNote;
+      if (noteBytes <= handoffBytes) {
+        bodyText = truncateUtf8(rawBody, handoffBytes - noteBytes).text + truncationNote;
       } else {
-        bodyText = truncateUtf8("[Truncated]", availableBody).text;
+        bodyText = truncateUtf8("[Compact handoff truncated]", handoffBytes).text;
       }
     }
     const start = content.length + prefix.length;
@@ -110,6 +136,7 @@ export function renderDeliveryMessage(
     if (!options.expanded && firstLine) lines.push(theme.fg("muted", `  ${firstLine}`));
     if (options.expanded) {
       lines.push(theme.fg("dim", `  role=${event.agentName} model=${event.model}`));
+      if (event.entryId) lines.push(theme.fg("dim", `  result=${event.entryId}`));
       if (event.classification) lines.push(theme.fg("dim", `  classification=${event.classification}`));
       if (event.sessionPath) lines.push(theme.fg("dim", `  session=${event.sessionPath}`));
       if (eventText) lines.push(eventText);
@@ -124,6 +151,7 @@ export class DeliveryScheduler {
   private readonly debounceMs: number;
   private timer?: ReturnType<typeof setTimeout>;
   private context?: ExtensionContext;
+  private deliveredListener?: (events: DeliveryEvent[]) => void;
   private closed = false;
 
   constructor(pi: Pick<ExtensionAPI, "sendMessage">, debounceMs = 500) {
@@ -140,6 +168,17 @@ export class DeliveryScheduler {
     if (this.closed) return;
     this.queue.push(event);
     this.scheduleIfIdle();
+  }
+
+  setDeliveredListener(listener: (events: DeliveryEvent[]) => void): void {
+    this.deliveredListener = listener;
+  }
+
+  cancelQueuedResult(paneId: string, entryId: string): boolean {
+    const index = this.queue.findIndex((event) => event.paneId === paneId && event.entryId === entryId);
+    if (index < 0) return false;
+    this.queue.splice(index, 1);
+    return true;
   }
 
   parentSettled(ctx: ExtensionContext): void {
@@ -165,13 +204,14 @@ export class DeliveryScheduler {
     const message = buildDeliveryMessage(this.queue);
     const consumed = message.details.events.length;
     if (!consumed) return;
-    this.queue.splice(0, consumed);
+    const deliveredEvents = this.queue.splice(0, consumed);
     this.pi.sendMessage({
       customType: DELIVERY_CUSTOM_TYPE,
       content: message.content,
       display: true,
       details: message.details,
     }, { deliverAs: "followUp", triggerTurn: true });
+    this.deliveredListener?.(deliveredEvents);
     this.scheduleIfIdle();
   }
 

@@ -86,7 +86,10 @@ export function parseSubagentCommand(value: string): ParsedSubagentCommand | nul
   return { agent, task: task.join(" "), ...(placement ? { placement } : {}) };
 }
 
-function limitToolText(value: string, maximumBytes = 50 * 1024): string {
+const MAX_RESULT_RETRIEVAL_BYTES = 50 * 1024;
+const DEFAULT_RESULT_RETRIEVAL_BYTES = 16 * 1024;
+
+function limitToolText(value: string, maximumBytes = MAX_RESULT_RETRIEVAL_BYTES): string {
   if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
   const note = "\n[Result truncated; inspect the child session JSONL for the full response.]";
   const target = maximumBytes - Buffer.byteLength(note, "utf8");
@@ -186,15 +189,38 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
   pi.registerTool({
     name: "get_subagent_result",
     label: "Get Subagent Result",
-    description: "Return the latest completed assistant response from a tracked persistent child without waiting.",
-    parameters: Type.Object({ paneId: Type.String() }),
+    description: "Retrieve the latest completed response once, without waiting. Automatic handoffs are compact; use this only when their omitted detail is needed. A queued automatic handoff is cancelled to prevent duplicate delivery.",
+    parameters: Type.Object({
+      paneId: Type.String(),
+      maxBytes: Type.Optional(Type.Integer({
+        minimum: 1024,
+        maximum: MAX_RESULT_RETRIEVAL_BYTES,
+        description: `Maximum model-visible response bytes (default ${DEFAULT_RESULT_RETRIEVAL_BYTES})`,
+      })),
+    }),
     async execute(_id, params) {
-      const value = await controller.getResult(params.paneId) as { status: string; result?: { text?: string; [key: string]: unknown } };
-      const text = value.result?.text
-        ? `Subagent ${params.paneId}: ${value.status}\n\nLatest completed result:\n${value.result.text}`
-        : `Subagent ${params.paneId}: ${value.status}`;
+      const value = await controller.getResult(params.paneId) as {
+        status: string;
+        result?: { text?: string; [key: string]: unknown };
+        alreadyRetrieved?: boolean;
+        entryId?: string;
+      };
+      if (value.alreadyRetrieved) {
+        return toolResult(
+          `Subagent ${params.paneId}: ${value.status}. Result ${value.entryId ?? ""} was already retrieved; not repeating it.`,
+          value,
+        );
+      }
+      const heading = `Subagent ${params.paneId}: ${value.status}`;
+      const resultText = value.result?.text
+        || (typeof value.result?.errorMessage === "string" ? value.result.errorMessage : "");
+      const maximumBytes = params.maxBytes ?? DEFAULT_RESULT_RETRIEVAL_BYTES;
+      const bodyBudget = Math.max(0, maximumBytes - Buffer.byteLength(`${heading}\n\nLatest completed result:\n`, "utf8"));
+      const text = resultText
+        ? `${heading}\n\nLatest completed result:\n${limitToolText(resultText, bodyBudget)}`
+        : heading;
       const details = value.result
-        ? { ...value, result: { ...value.result, text: limitToolText(value.result.text ?? "") } }
+        ? { ...value, result: Object.fromEntries(Object.entries(value.result).filter(([key]) => key !== "text")) }
         : value;
       return toolResult(text, details);
     },

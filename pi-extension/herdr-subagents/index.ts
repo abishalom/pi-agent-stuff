@@ -7,6 +7,7 @@ import { loadAgentCatalog } from "./agents.ts";
 import {
   DELIVERY_CUSTOM_TYPE,
   DeliveryScheduler,
+  pruneDigestedDeliveryMessages,
   renderDeliveryMessage,
 } from "./delivery.ts";
 import { chooseSplitDirection, CliHerdrClient, controlNameFor } from "./herdr.ts";
@@ -239,6 +240,7 @@ export class HerdrSubagentsRuntime implements SubagentController {
         sessionPath: prompted.sessionPath ?? sessionPath,
         status: prompted.status === "blocked" ? "blocked" : "working",
         queuedFollowups: [],
+        resultDeliveryStates: new Map(),
         stateChangeSeq: prompted.stateChangeSeq,
         startedAt: Date.now(),
         turnStartedAt: Date.now(),
@@ -292,6 +294,7 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
     pi.registerMessageRenderer(DELIVERY_CUSTOM_TYPE, renderDeliveryMessage);
     registerSubagentsUI(pi, runtime);
     pi.on("session_start", (_event, ctx) => runtime.startSession(ctx));
+    pi.on("context", (event) => ({ messages: pruneDigestedDeliveryMessages(event.messages) }));
     pi.on("agent_settled", (_event, ctx) => runtime.parentSettled(ctx));
     pi.on("session_shutdown", () => runtime.shutdown());
   };

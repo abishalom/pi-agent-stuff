@@ -226,7 +226,7 @@ Return the latest completed assistant response for a tracked persistent child wi
 { paneId: string }
 ```
 
-Return `working`, `blocked`, or `no completed result` when appropriate. Reconcile the session JSONL before responding; do not rely only on the cached delivered result. This tool does not trigger duplicate automatic delivery.
+Return `working`, `blocked`, or `no completed result` when appropriate. Reconcile the session JSONL before responding; do not rely only on the cached delivered result. Retrieval is one-shot per result entry: repeated calls return metadata without repeating response text. The default model-visible retrieval limit is 16 KiB and callers may request up to 50 KiB. If the matching automatic handoff is still queued, cancel it before returning the result so it cannot trigger a redundant parent turn.
 
 ### `subagents_list`
 
@@ -351,7 +351,7 @@ Use one abortable monitor loop per tracked child:
 5. Never busy-loop on a currently matching settled status; after settlement, wait for `working`, `blocked`, or agent disappearance while the periodic two-second JSONL reconciliation continues.
 6. On working, record the current Herdr state-change sequence as the turn episode when available.
 7. On blocked, emit one compact notice per blocked episode.
-8. On every reconciliation, deliver every unseen final assistant entry in append order.
+8. On every reconciliation, queue a compact handoff for every unseen final assistant entry in append order, unless that entry was already explicitly retrieved.
 9. After settlement reconciliation, re-check status before sending at most one queued follow-up.
 10. Abort all waits and suppress late callbacks when the parent runtime shuts down.
 
@@ -428,9 +428,13 @@ Collapsed completion example:
   Found three authentication entry points…
 ```
 
-Expanded details include the retained result text, resolved role/model, pane ID, elapsed time, classification, and session path.
+Expanded details include the compact handoff text, resolved role/model, pane ID, result entry ID, elapsed time, classification, and session path. Do not duplicate response text in renderer details.
 
-Limit all child response text stored in the parent custom message—including renderer details—to 50 KiB of valid UTF-8. Mark truncation explicitly and point to the child session path. The full response remains only in the child session JSONL.
+Bundled role prompts target compact final handoffs. Independently cap each automatic response excerpt at 6 KiB of valid UTF-8 and each combined parent custom message at 16 KiB. Mark truncation explicitly, direct the parent to `get_subagent_result`, and retain the full response only in the child session JSONL.
+
+Track result delivery as `queued`, `delivered`, or `retrieved`. Explicit retrieval cancels a matching queued handoff. A delivered compact handoff may be followed by one explicit bounded retrieval, but the full response must never be returned twice.
+
+Register a `context` hook that keeps an unread handoff during the parent run consuming it, including intermediate tool-use turns and failed, interrupted, or length-limited attempts, then omits that custom message from later model calls only after a successful parent response with `stopReason: stop`. The persisted transcript remains unchanged.
 
 The renderer must support completion, blocked, interrupted, incomplete, failure, exited, and closed states.
 
@@ -453,6 +457,8 @@ interface TrackedSubagent {
   queuedFollowups: string[];
   lastObservedEntryId?: string;
   lastDeliveredEntryId?: string;
+  lastRetrievedEntryId?: string;
+  resultDeliveryStates: Map<string, "queued" | "delivered" | "retrieved">;
   interruptEpisodeSeq?: number;
   startedAt: number;
   turnStartedAt?: number;
@@ -534,15 +540,16 @@ Required coverage:
 - Owned-pane enforcement for follow-up, interrupt, and result tools
 - Initial settled-state suppression and `idle`/`done` normalization
 - New JSONL delivery when `working` was not observed
-- JSONL partial UTF-8 writes, truncation, session replacement, and stop-reason classification
+- JSONL partial UTF-8 writes, truncation, session replacement, concurrent refresh serialization, and stop-reason classification
 - Delivery of multiple unseen final entries in append order
 - Automatic relay of both parent-originated and direct-child turns
 - Follow-up FIFO, one-per-settlement draining, and direct-turn race recheck
 - Blocked follow-up and interrupt behavior
 - Turn-scoped interrupt attribution and queue clearing
 - 500 ms parent delivery coalescing while idle and after `agent_settled`
-- Parent-message UTF-8 truncation across content and details
-- `get_subagent_result` reconciliation without duplicate delivery
+- Per-handoff and parent-message UTF-8 truncation without response text in details
+- `get_subagent_result` one-shot reconciliation, queued-handoff cancellation, and repeated-retrieval suppression
+- Context pruning only after a successful parent response consumes a handoff, while retryable attempts retain it
 - Pane missing versus Pi exited in a surviving pane
 - Parent shutdown aborts monitors/timers and leaves children running
 - Child marker disables all orchestration registration

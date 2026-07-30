@@ -9,7 +9,9 @@ import { loadAgentCatalog } from "../../pi-extension/herdr-subagents/agents.ts";
 import {
 	buildDeliveryMessage,
 	DeliveryScheduler,
+	MAX_AUTOMATIC_HANDOFF_BYTES,
 	MAX_PARENT_MESSAGE_BYTES,
+	pruneDigestedDeliveryMessages,
 } from "../../pi-extension/herdr-subagents/delivery.ts";
 import {
 	chooseSplitDirection,
@@ -353,6 +355,23 @@ test("incremental session reader baselines history and handles partial UTF-8 plu
 	assert.deepEqual(await reader.scanUnseen(), []);
 });
 
+test("session reader serializes concurrent refresh and delivery operations", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "session.jsonl");
+	await writeFile(path, `${JSON.stringify({ type: "session", version: 3 })}\n`);
+	const reader = new IncrementalSessionReader(path);
+	await reader.baseline();
+	await appendFile(path, jsonLine(assistantEntry("a", "stop", "first")));
+	const latest = await Promise.all([reader.latest(), reader.latest()]);
+	assert.deepEqual(latest.map((result) => result.entryId), ["a", "a"]);
+	await appendFile(path, jsonLine(assistantEntry("b", "stop", "second")));
+	assert.deepEqual((await reader.scanUnseen()).map((result) => result.entryId), ["a", "b"]);
+	await appendFile(path, jsonLine(assistantEntry("c", "stop", "third")));
+	const concurrentScans = await Promise.all([reader.scanUnseen(), reader.scanUnseen()]);
+	assert.deepEqual(concurrentScans.flat().map((result) => result.entryId), ["c"]);
+});
+
 test("session reader attributes aborted results only to the interrupted turn", async (t) => {
 	const root = await temporaryDirectory();
 	t.after(() => rm(root, { recursive: true, force: true }));
@@ -399,15 +418,18 @@ test("session reader baselines historical results and same-path replacements", a
 	assert.equal((await reader.scanUnseen()).at(-1).text, "inode fresh");
 });
 
-test("delivery message caps valid UTF-8 without duplicating response text in details", () => {
+test("delivery message creates a compact valid-UTF-8 handoff without duplicating response text in details", () => {
 	const text = "🙂".repeat(MAX_PARENT_MESSAGE_BYTES);
 	const message = buildDeliveryMessage([{
-		kind: "completion", paneId: "w1:p2", label: "[E] Explorer", agentName: "explorer",
+		kind: "completion", paneId: "w1:p2", entryId: "result-1", label: "[E] Explorer", agentName: "explorer",
 		model: "p/m", elapsedMs: 1000, text, sessionPath: "/tmp/session.jsonl", classification: "success",
 	}]);
+	assert.ok(Buffer.byteLength(message.content, "utf8") <= MAX_AUTOMATIC_HANDOFF_BYTES + 256);
 	assert.ok(Buffer.byteLength(message.content, "utf8") <= MAX_PARENT_MESSAGE_BYTES);
 	assert.equal(message.content.includes("�"), false);
+	assert.match(message.content, /get_subagent_result/);
 	assert.equal(Object.hasOwn(message.details.events[0], "text"), false);
+	assert.equal(message.details.events[0].entryId, "result-1");
 	assert.equal(message.details.events[0].truncated, true);
 });
 
@@ -416,14 +438,44 @@ test("delivery scheduler preserves events that do not fit in the first capped me
 	const scheduler = new DeliveryScheduler({ sendMessage(message) { sent.push(message); } }, 1);
 	scheduler.setContext({ isIdle: () => true });
 	const large = "🙂".repeat(MAX_PARENT_MESSAGE_BYTES);
-	for (const paneId of ["p1", "p2"]) {
+	for (const paneId of ["p1", "p2", "p3", "p4"]) {
 		scheduler.enqueue({ kind: "completion", paneId, label: paneId, agentName: "explorer", model: "p/m", elapsedMs: 1, text: large });
 	}
-	await new Promise((resolve) => setTimeout(resolve, 15));
+	await new Promise((resolve) => setTimeout(resolve, 20));
 	assert.equal(sent.length, 2);
-	assert.deepEqual(sent.map((message) => message.details.events[0].paneId), ["p1", "p2"]);
+	assert.deepEqual(sent.flatMap((message) => message.details.events.map((event) => event.paneId)), ["p1", "p2", "p3", "p4"]);
 	assert.ok(sent.every((message) => Buffer.byteLength(message.content, "utf8") <= MAX_PARENT_MESSAGE_BYTES));
 	scheduler.shutdown();
+});
+
+test("delivery scheduler cancels a queued result and reports only actually delivered entries", async () => {
+	const sent = [];
+	const delivered = [];
+	let idle = false;
+	const scheduler = new DeliveryScheduler({ sendMessage(message) { sent.push(message); } }, 1);
+	scheduler.setDeliveredListener((events) => delivered.push(...events));
+	const ctx = { isIdle: () => idle };
+	scheduler.setContext(ctx);
+	scheduler.enqueue({ kind: "completion", paneId: "p1", entryId: "r1", label: "p1", agentName: "explorer", model: "p/m", elapsedMs: 1, text: "full result" });
+	assert.equal(scheduler.cancelQueuedResult("p1", "r1"), true);
+	idle = true;
+	scheduler.parentSettled(ctx);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(sent.length, 0);
+	assert.equal(delivered.length, 0);
+	scheduler.shutdown();
+});
+
+test("context pruning keeps a handoff through retryable attempts and drops it after a successful parent response", () => {
+	const delivery = { role: "custom", customType: "herdr-subagent-events", content: "handoff" };
+	const toolUse = { role: "assistant", stopReason: "toolUse" };
+	const failed = { role: "assistant", stopReason: "error" };
+	const final = { role: "assistant", stopReason: "stop" };
+	assert.deepEqual(pruneDigestedDeliveryMessages([delivery, toolUse]), [delivery, toolUse]);
+	assert.deepEqual(pruneDigestedDeliveryMessages([delivery, failed]), [delivery, failed]);
+	assert.deepEqual(pruneDigestedDeliveryMessages([delivery, toolUse, final]), [toolUse, final]);
+	const newer = { ...delivery, content: "newer" };
+	assert.deepEqual(pruneDigestedDeliveryMessages([delivery, final, newer]), [final, newer]);
 });
 
 test("delivery scheduler coalesces events and waits for parent settlement", async () => {
@@ -446,20 +498,48 @@ test("delivery scheduler coalesces events and waits for parent settlement", asyn
 	scheduler.shutdown();
 });
 
-test("get_subagent_result tool always exposes child status with its latest result", async () => {
+test("get_subagent_result exposes bounded content once without copying response text into details", async () => {
 	const tools = new Map();
 	const pi = {
 		registerTool(tool) { tools.set(tool.name, tool); },
 		registerCommand() {},
 	};
+	let calls = 0;
 	const controller = {
 		getCatalog() { return { definitions: [], diagnostics: [], get() {} }; },
-		async getResult() { return { status: "working", result: { text: "previous result", classification: "success" } }; },
+		async getResult() {
+			calls += 1;
+			return calls === 1
+				? { status: "working", entryId: "r1", result: { entryId: "r1", text: "previous result ".repeat(1000), classification: "success" } }
+				: { status: "working", entryId: "r1", alreadyRetrieved: true };
+		},
 	};
 	registerSubagentsUI(pi, controller);
-	const result = await tools.get("get_subagent_result").execute("call", { paneId: "w1:p2" });
+	const tool = tools.get("get_subagent_result");
+	const result = await tool.execute("call", { paneId: "w1:p2", maxBytes: 1024 });
 	assert.match(result.content[0].text, /w1:p2: working/);
 	assert.match(result.content[0].text, /previous result/);
+	assert.ok(Buffer.byteLength(result.content[0].text, "utf8") <= 1024);
+	assert.equal(Object.hasOwn(result.details.result, "text"), false);
+	const repeated = await tool.execute("call-2", { paneId: "w1:p2" });
+	assert.match(repeated.content[0].text, /already retrieved; not repeating/i);
+});
+
+test("get_subagent_result preserves failures that have no assistant text", async () => {
+	const tools = new Map();
+	registerSubagentsUI({
+		registerTool(tool) { tools.set(tool.name, tool); },
+		registerCommand() {},
+	}, {
+		getCatalog() { return { definitions: [], diagnostics: [], get() {} }; },
+		async getResult() {
+			return { status: "completed", entryId: "failed", result: {
+				entryId: "failed", text: "", classification: "failure", errorMessage: "credentials expired",
+			} };
+		},
+	});
+	const result = await tools.get("get_subagent_result").execute("call", { paneId: "w1:p2" });
+	assert.match(result.content[0].text, /credentials expired/);
 });
 
 test("command parser supports placement, --, and rejects ambiguous options", () => {
@@ -527,7 +607,7 @@ function trackedChild(sessionPath, status = "working") {
 		paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", agentName: "explorer",
 		agentSourcePath: "/tmp/explorer.md", label: "[E] Explorer", placement: "tab",
 		model: "p/m", thinking: "low", tools: ["read"], sessionPath, status,
-		queuedFollowups: [], startedAt: Date.now(), turnStartedAt: Date.now(),
+		queuedFollowups: [], resultDeliveryStates: new Map(), startedAt: Date.now(), turnStartedAt: Date.now(),
 		monitorAbort: new AbortController(), generation: 1,
 	};
 }
@@ -550,6 +630,41 @@ test("monitor delivers JSONL completion even when working transition was missed"
 	await new Promise((resolve) => setTimeout(resolve, 25));
 	assert.equal(sent.length, 1);
 	assert.match(sent[0].content, /final result/);
+	manager.shutdown();
+	delivery.shutdown();
+});
+
+test("explicit result retrieval cancels a queued handoff and suppresses repeated full output", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "child.jsonl");
+	await writeFile(path, `${JSON.stringify({ type: "session", version: 3 })}\n`);
+	const readers = new SessionReaderStore();
+	await readers.get(path).baseline();
+	await appendFile(path, jsonLine(assistantEntry("done", "stop", "full final result")));
+	const sent = [];
+	let idle = false;
+	const ctx = { isIdle: () => idle };
+	const delivery = new DeliveryScheduler({ sendMessage(message) { sent.push(message); } }, 1);
+	delivery.setContext(ctx);
+	const client = new LifecycleHerdrClient(path);
+	client.status = "idle";
+	const manager = new SubagentMonitorManager(client, delivery, readers);
+	const child = trackedChild(path);
+	manager.track(child);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(child.resultDeliveryStates.get("done"), "queued");
+	const retrieved = await manager.getResult(child.paneId);
+	assert.equal(retrieved.result.text, "full final result");
+	assert.equal(retrieved.automaticHandoffCancelled, true);
+	assert.equal(child.resultDeliveryStates.get("done"), "retrieved");
+	idle = true;
+	delivery.parentSettled(ctx);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(sent.length, 0);
+	const repeated = await manager.getResult(child.paneId);
+	assert.equal(repeated.alreadyRetrieved, true);
+	assert.equal(repeated.result, undefined);
 	manager.shutdown();
 	delivery.shutdown();
 });

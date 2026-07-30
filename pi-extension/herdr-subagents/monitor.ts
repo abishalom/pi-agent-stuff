@@ -32,6 +32,7 @@ export class SubagentMonitorManager {
     this.client = client;
     this.delivery = delivery;
     this.readers = readers;
+    this.delivery.setDeliveredListener((events) => this.markDelivered(events));
   }
 
   list(): TrackedSubagent[] {
@@ -80,6 +81,8 @@ export class SubagentMonitorManager {
     child.latestResult = undefined;
     child.lastObservedEntryId = undefined;
     child.lastDeliveredEntryId = undefined;
+    child.lastRetrievedEntryId = undefined;
+    child.resultDeliveryStates.clear();
     this.clearInterrupt(child);
   }
 
@@ -92,8 +95,10 @@ export class SubagentMonitorManager {
     for (const result of results) {
       child.latestResult = result;
       child.lastObservedEntryId = result.entryId;
-      child.lastDeliveredEntryId = result.entryId;
+      if (child.resultDeliveryStates.get(result.entryId) === "retrieved") continue;
+      child.resultDeliveryStates.set(result.entryId, "queued");
       this.delivery.enqueue(this.event(child, resultKind(result), {
+        entryId: result.entryId,
         text: result.text,
         classification: result.classification,
         sessionPath: result.sessionPath,
@@ -101,6 +106,16 @@ export class SubagentMonitorManager {
       }));
     }
     return results.length;
+  }
+
+  private markDelivered(events: DeliveryEvent[]): void {
+    for (const event of events) {
+      if (!event.entryId) continue;
+      const child = this.children.get(event.paneId);
+      if (!child || child.resultDeliveryStates.get(event.entryId) !== "queued") continue;
+      child.resultDeliveryStates.set(event.entryId, "delivered");
+      child.lastDeliveredEntryId = event.entryId;
+    }
   }
 
   private async reconcile(child: TrackedSubagent): Promise<PaneInfo | null> {
@@ -273,7 +288,13 @@ export class SubagentMonitorManager {
     return { interrupted: true, status: "Escape sent" };
   }
 
-  async getResult(paneId: string): Promise<{ status: string; result?: ChildResult }> {
+  async getResult(paneId: string): Promise<{
+    status: string;
+    result?: ChildResult;
+    alreadyRetrieved?: boolean;
+    automaticHandoffCancelled?: boolean;
+    entryId?: string;
+  }> {
     const child = this.requireOwned(paneId);
     const current = await this.client.getAgent(paneId);
     if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
@@ -285,9 +306,18 @@ export class SubagentMonitorManager {
       );
       if (latest) child.latestResult = latest;
     }
-    if (current.status === "working") return { status: "working", result: child.latestResult };
-    if (current.status === "blocked") return { status: "blocked", result: child.latestResult };
-    return child.latestResult ? { status: "completed", result: child.latestResult } : { status: "no completed result" };
+    const status = current.status === "working" ? "working"
+      : current.status === "blocked" ? "blocked"
+        : child.latestResult ? "completed" : "no completed result";
+    const result = child.latestResult;
+    if (!result) return { status };
+    if (child.resultDeliveryStates.get(result.entryId) === "retrieved") {
+      return { status, alreadyRetrieved: true, entryId: result.entryId };
+    }
+    const automaticHandoffCancelled = this.delivery.cancelQueuedResult(paneId, result.entryId);
+    child.resultDeliveryStates.set(result.entryId, "retrieved");
+    child.lastRetrievedEntryId = result.entryId;
+    return { status, result, entryId: result.entryId, automaticHandoffCancelled };
   }
 
   shutdown(): void {

@@ -6,6 +6,7 @@ export type AgentSource = "bundled" | "global" | "project";
 export type ChildStatus = "starting" | "working" | "blocked" | "settled" | "exited";
 export type HerdrStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 export type ResultClassification = "success" | "incomplete" | "failure" | "interrupted";
+export type ResultDeliveryState = "queued" | "delivered" | "retrieved";
 
 export interface AgentDiagnostic {
   source: AgentSource;
@@ -104,6 +105,7 @@ export interface ChildResult {
 export interface DeliveryEvent {
   kind: "completion" | "blocked" | "interrupted" | "incomplete" | "failure" | "exited" | "closed";
   paneId: string;
+  entryId?: string;
   label: string;
   agentName: string;
   model: string;
@@ -130,6 +132,8 @@ export interface TrackedSubagent {
   queuedFollowups: string[];
   lastObservedEntryId?: string;
   lastDeliveredEntryId?: string;
+  lastRetrievedEntryId?: string;
+  resultDeliveryStates: Map<string, ResultDeliveryState>;
   interruptEpisodeSeq?: number;
   interruptBaselineMessageIndex?: number;
   stateChangeSeq?: number;

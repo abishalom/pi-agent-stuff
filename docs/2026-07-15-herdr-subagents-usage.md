@@ -45,7 +45,7 @@ The resolved model/thinking policy comes from `config/subagent-model-overrides.j
 
 - `subagent_followup`: submit a follow-up immediately or queue it FIFO behind active work.
 - `subagent_interrupt`: send Escape to a working child without closing its pane or Pi process.
-- `get_subagent_result`: return the latest completed response without waiting.
+- `get_subagent_result`: retrieve the latest completed response once without waiting. The default model-visible limit is 16 KiB and callers may request up to 50 KiB.
 - `subagents_list`: show resolved role definitions and discovery diagnostics.
 
 Control tools accept only pane IDs launched by the current parent runtime. They reject unrelated panes and children surviving an earlier `/reload`, session replacement, or parent process.
@@ -54,11 +54,11 @@ A blocked child may be displaying a selector or permission prompt. Follow-ups ar
 
 ## Result delivery
 
-Herdr provides coarse child lifecycle status. The extension reads exact responses from the child's Pi session JSONL and automatically sends completed responses back to the parent.
+Herdr provides coarse child lifecycle status. The extension reads exact responses from the child's Pi session JSONL and automatically sends a compact handoff back to the parent. Bundled roles are instructed to keep that handoff concise; defensive delivery limits cap each response excerpt at 6 KiB and each combined parent message at 16 KiB. The full response remains in the child JSONL.
 
-Closely timed events are combined into one parent follow-up after a 500 ms debounce. Expand the custom result message to see role/model, pane ID, classification, elapsed time, and session path. Parent messages are capped at 50 KiB; the full response remains in the child JSONL.
+Closely timed events are combined into one parent follow-up after a 500 ms debounce. Expand the custom result message to see role/model, pane ID, classification, elapsed time, and session path. After a successful parent response consumes a handoff, later model calls omit that old custom message while the session transcript still retains it. Failed, interrupted, or length-limited attempts keep the handoff available for retry.
 
-Direct turns initiated in a child pane are also relayed to the parent.
+Use `get_subagent_result` only when the compact handoff omitted needed detail. Retrieval is one-shot: repeated calls do not inject the same full response again. If retrieval happens while its automatic handoff is still queued, the queued handoff is cancelled to avoid a redundant parent turn. Direct turns initiated in a child pane are also relayed through compact handoffs.
 
 ## Lifecycle and safety
 

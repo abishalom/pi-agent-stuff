@@ -65,6 +65,7 @@ export class IncrementalSessionReader {
   private readonly baselined = new Set<string>();
   private readonly userMessageIndexes: number[] = [];
   private nextMessageIndex = 0;
+  private operationTail: Promise<void> = Promise.resolve();
 
   constructor(path: string) {
     this.path = path;
@@ -80,7 +81,13 @@ export class IncrementalSessionReader {
     this.nextMessageIndex = 0;
   }
 
-  async refresh(): Promise<void> {
+  private runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.operationTail.then(operation, operation);
+    this.operationTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async refreshUnlocked(): Promise<void> {
     let info: Awaited<ReturnType<typeof stat>>;
     try {
       info = await stat(this.path);
@@ -146,17 +153,25 @@ export class IncrementalSessionReader {
     }
   }
 
+  async refresh(): Promise<void> {
+    await this.runExclusive(() => this.refreshUnlocked());
+  }
+
   async baseline(): Promise<void> {
-    await this.refresh();
-    for (const id of this.order) {
-      this.delivered.add(id);
-      this.baselined.add(id);
-    }
+    await this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      for (const id of this.order) {
+        this.delivered.add(id);
+        this.baselined.add(id);
+      }
+    });
   }
 
   async messageCursor(): Promise<number> {
-    await this.refresh();
-    return this.nextMessageIndex;
+    return this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      return this.nextMessageIndex;
+    });
   }
 
   private belongsToInterruptedTurn(entry: AssistantEntry, baselineMessageIndex?: number): boolean {
@@ -165,52 +180,56 @@ export class IncrementalSessionReader {
   }
 
   async scanUnseen(parentInterrupted = false, interruptBaselineMessageIndex?: number): Promise<ChildResult[]> {
-    await this.refresh();
-    const results: ChildResult[] = [];
-    for (let index = 0; index < this.order.length; index += 1) {
-      const id = this.order[index]!;
-      if (this.delivered.has(id)) continue;
-      const entry = this.entries.get(id)!;
-      const belongsToInterrupt = parentInterrupted && this.belongsToInterruptedTurn(entry, interruptBaselineMessageIndex);
-      const classification = classify(entry, belongsToInterrupt);
-      if (!classification) continue;
-      this.delivered.add(id);
-      results.push({
-        entryId: entry.id,
-        text: entry.text,
-        classification,
-        stopReason: entry.stopReason,
-        errorMessage: entry.errorMessage,
-        provider: entry.provider,
-        model: entry.model,
-        timestamp: entry.timestamp,
-        sessionPath: this.path,
-      });
-    }
-    return results;
+    return this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      const results: ChildResult[] = [];
+      for (let index = 0; index < this.order.length; index += 1) {
+        const id = this.order[index]!;
+        if (this.delivered.has(id)) continue;
+        const entry = this.entries.get(id)!;
+        const belongsToInterrupt = parentInterrupted && this.belongsToInterruptedTurn(entry, interruptBaselineMessageIndex);
+        const classification = classify(entry, belongsToInterrupt);
+        if (!classification) continue;
+        this.delivered.add(id);
+        results.push({
+          entryId: entry.id,
+          text: entry.text,
+          classification,
+          stopReason: entry.stopReason,
+          errorMessage: entry.errorMessage,
+          provider: entry.provider,
+          model: entry.model,
+          timestamp: entry.timestamp,
+          sessionPath: this.path,
+        });
+      }
+      return results;
+    });
   }
 
   async latest(parentInterrupted = false, interruptBaselineMessageIndex?: number): Promise<ChildResult | undefined> {
-    await this.refresh();
-    for (let index = this.order.length - 1; index >= 0; index -= 1) {
-      const id = this.order[index]!;
-      if (this.baselined.has(id)) continue;
-      const entry = this.entries.get(id)!;
-      const classification = classify(entry, parentInterrupted && this.belongsToInterruptedTurn(entry, interruptBaselineMessageIndex));
-      if (!classification) continue;
-      return {
-        entryId: entry.id,
-        text: entry.text,
-        classification,
-        stopReason: entry.stopReason,
-        errorMessage: entry.errorMessage,
-        provider: entry.provider,
-        model: entry.model,
-        timestamp: entry.timestamp,
-        sessionPath: this.path,
-      };
-    }
-    return undefined;
+    return this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      for (let index = this.order.length - 1; index >= 0; index -= 1) {
+        const id = this.order[index]!;
+        if (this.baselined.has(id)) continue;
+        const entry = this.entries.get(id)!;
+        const classification = classify(entry, parentInterrupted && this.belongsToInterruptedTurn(entry, interruptBaselineMessageIndex));
+        if (!classification) continue;
+        return {
+          entryId: entry.id,
+          text: entry.text,
+          classification,
+          stopReason: entry.stopReason,
+          errorMessage: entry.errorMessage,
+          provider: entry.provider,
+          model: entry.model,
+          timestamp: entry.timestamp,
+          sessionPath: this.path,
+        };
+      }
+      return undefined;
+    });
   }
 
   hasDelivered(entryId: string): boolean {

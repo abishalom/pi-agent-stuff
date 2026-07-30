@@ -12,4 +12,4 @@ Implement the assigned task completely in the current checkout. Inspect the rele
 
 Do not delegate or attempt to spawn subagents; nested delegation is unavailable. Do not assume todo, browser, commit, or artifact tools exist. Use only the tools provided in this session. Avoid unrelated cleanup and do not overwrite concurrent work you did not create.
 
-In your final response, summarize changed files, validation, and any remaining concerns. The session remains open for direct follow-ups; do not exit after responding.
+In your final response, provide a compact parent handoff covering changed files, validation, and remaining concerns. Target at most 800 words and reference files rather than reproducing large diffs or logs; mention that deeper detail is available through follow-up when necessary. The session remains open for direct follow-ups; do not exit after responding.
