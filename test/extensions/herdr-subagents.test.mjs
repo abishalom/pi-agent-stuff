@@ -524,6 +524,38 @@ test("subagent launch instructs the parent to yield instead of polling", async (
 	assert.match(result.content[0].text, /Do not poll; finish this turn\. You will be resumed automatically when the child emits a handoff\./);
 });
 
+test("/subagent command forwards parsed launch overrides", async () => {
+	let command;
+	let launched;
+	const notifications = [];
+	registerSubagentsUI({ registerTool() {}, registerCommand(_name, value) { command = value; } }, {
+		async launch(input) { launched = input; return { label: "Worker", paneId: "w1:p2" }; },
+	});
+	await command.handler("worker --model p/m --thinking high Task", { ui: { notify(...args) { notifications.push(args); } } });
+	assert.deepEqual(launched, { agent: "worker", task: "Task", model: "p/m", thinking: "high" });
+	assert.match(notifications[0][0], /Started Worker/);
+});
+
+test("subagent tool exposes model and thinking overrides and returns resolved child metadata", async () => {
+	const tools = new Map();
+	let received;
+	registerSubagentsUI({ registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} }, {
+		async launch(input) {
+			received = input;
+			return { label: "Worker", paneId: "w1:p2", tabId: "w1:t2", agentName: "worker", placement: "tab",
+				model: input.model, thinking: input.thinking, sessionPath: "/tmp/child.jsonl" };
+		},
+	});
+	const tool = tools.get("subagent");
+	assert.ok(tool.parameters.properties.model);
+	assert.ok(tool.parameters.properties.thinking);
+	const result = await tool.execute("call", { agent: "worker", task: "Task", model: "p/m", thinking: "high" }, undefined, undefined, {});
+	assert.equal(received.model, "p/m");
+	assert.equal(received.thinking, "high");
+	assert.equal(result.details.model, "p/m");
+	assert.equal(result.details.thinking, "high");
+});
+
 test("get_subagent_result exposes bounded content once without copying response text into details", async () => {
 	const tools = new Map();
 	const pi = {
@@ -568,7 +600,7 @@ test("get_subagent_result preserves failures that have no assistant text", async
 	assert.match(result.content[0].text, /credentials expired/);
 });
 
-test("command parser supports placement, --, and rejects ambiguous options", () => {
+test("command parser supports placement, model, thinking, --, and rejects ambiguous options", () => {
 	assert.deepEqual(parseSubagentCommand("reviewer --placement split Review the diff"), {
 		agent: "reviewer", placement: "split", task: "Review the diff",
 	});
@@ -576,6 +608,22 @@ test("command parser supports placement, --, and rejects ambiguous options", () 
 		agent: "explorer", task: "--placement is task text",
 	});
 	assert.throws(() => parseSubagentCommand("worker --placement tab --placement split task"), /Duplicate/);
+	assert.deepEqual(parseSubagentCommand("worker --model openai-codex/gpt-6.0-astra --thinking high --placement tab Task"), {
+		agent: "worker", model: "openai-codex/gpt-6.0-astra", thinking: "high", placement: "tab", task: "Task",
+	});
+	assert.deepEqual(parseSubagentCommand("worker --thinking off -- --model ignored"), {
+		agent: "worker", thinking: "off", task: "--model ignored",
+	});
+	for (const option of ["model", "thinking", "placement"]) {
+		const value = { model: "p/m", thinking: "high", placement: "tab" }[option];
+		assert.throws(() => parseSubagentCommand(`worker --${option} ${value} --${option} ${value} Task`), /Duplicate/);
+		assert.throws(() => parseSubagentCommand(`worker --${option} -- Task`), new RegExp(`Missing value for --${option}`));
+		assert.throws(() => parseSubagentCommand(`worker --${option}`), new RegExp(`Missing value for --${option}`));
+	}
+	assert.throws(() => parseSubagentCommand("worker --model short Task"), /provider\/model/);
+	assert.throws(() => parseSubagentCommand("worker --model p//m Task"), /provider\/model/);
+	assert.throws(() => parseSubagentCommand("worker --model p/m/ Task"), /provider\/model/);
+	assert.throws(() => parseSubagentCommand("worker --thinking extreme Task"), /Invalid --thinking/);
 	assert.throws(() => parseSubagentCommand("worker --unknown task"), /Unknown/);
 });
 
@@ -828,7 +876,7 @@ function fakePi() {
 }
 
 function fakeContext() {
-	const model = { provider: "openai-codex", id: "gpt-6-luna" };
+	const model = { provider: "openai-codex", id: "gpt-6-luna", reasoning: true };
 	return {
 		mode: "tui",
 		cwd: ROOT,
@@ -866,11 +914,89 @@ test("runtime launches a default tab, waits for prompt submission, cleans prompt
 	assert.ok(client.calls.some(([name, , message]) => name === "prompt" && message === "Find auth entry points"));
 	const start = client.calls.find(([name]) => name === "startPi")[1];
 	assert.ok(start.args.includes("--append-system-prompt"));
+	assert.equal(start.args[start.args.indexOf("--model") + 1], child.model);
+	assert.equal(start.args[start.args.indexOf("--thinking") + 1], child.thinking);
+	assert.equal(child.model, runtime.getCatalog().get("explorer").model);
+	assert.equal(child.thinking, runtime.getCatalog().get("explorer").thinking);
 	const promptPath = start.args[start.args.indexOf("--append-system-prompt") + 1];
 	assert.equal(existsSync(promptPath), false);
 	await assert.rejects(() => runtime.followup("w1:not-owned", "hello"), /not a child owned/);
 	await assert.rejects(() => runtime.interrupt("w1:not-owned"), /not a child owned/);
 	await assert.rejects(() => runtime.getResult("w1:not-owned"), /not a child owned/);
+	runtime.shutdown();
+});
+
+test("runtime resolves independent and combined launch overrides without changing catalog defaults", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const sessionPath = join(root, "child.jsonl");
+	await writeFile(sessionPath, `${JSON.stringify({ type: "session", version: 3 })}\n`);
+	for (const overrides of [{ model: "openai-codex/gpt-6.0-astra" }, { thinking: "high" }, { model: "openai-codex/gpt-6.0-astra", thinking: "off" }]) {
+		const client = new FakeHerdrClient(sessionPath);
+		const runtime = new HerdrSubagentsRuntime(fakePi(), {
+			clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
+			globalAgentsDir: join(root, "global"), env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" },
+		});
+		const ctx = fakeContext();
+		runtime.startSession(ctx);
+		const defaults = runtime.getCatalog().get("worker");
+		const child = await runtime.launch({ agent: "worker", task: "Task", ...overrides }, ctx);
+		const args = client.calls.find(([name]) => name === "startPi")[1].args;
+		assert.equal(child.model, overrides.model ?? defaults.model);
+		assert.equal(child.thinking, overrides.thinking ?? defaults.thinking);
+		assert.equal(args[args.indexOf("--model") + 1], child.model);
+		assert.equal(args[args.indexOf("--thinking") + 1], child.thinking);
+		assert.equal(runtime.getCatalog().get("worker").model, defaults.model);
+		assert.equal(runtime.getCatalog().get("worker").thinking, defaults.thinking);
+		runtime.shutdown();
+	}
+});
+
+test("runtime reports Pi's effective thinking level when the selected model clamps the request", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const sessionPath = join(root, "child.jsonl");
+	await writeFile(sessionPath, `${JSON.stringify({ type: "session", version: 3 })}\n`);
+	const client = new FakeHerdrClient(sessionPath);
+	const runtime = new HerdrSubagentsRuntime(fakePi(), {
+		clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
+		globalAgentsDir: join(root, "global"), env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" },
+	});
+	const ctx = fakeContext();
+	ctx.modelRegistry.find = (provider, id) => ({ provider, id, reasoning: false });
+	runtime.startSession(ctx);
+	const child = await runtime.launch({ agent: "worker", task: "Task", model: "test/plain", thinking: "high" }, ctx);
+	const args = client.calls.find(([name]) => name === "startPi")[1].args;
+	assert.equal(child.model, "test/plain");
+	assert.equal(child.thinking, "off");
+	assert.equal(args[args.indexOf("--thinking") + 1], "off");
+	assert.equal(runtime.getCatalog().get("worker").thinking, "medium");
+	runtime.shutdown();
+});
+
+test("runtime rejects invalid thinking and unconfigured, malformed or unauthenticated override models before surface creation", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const client = new FakeHerdrClient(join(root, "unused.jsonl"));
+	const runtime = new HerdrSubagentsRuntime(fakePi(), {
+		clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
+		globalAgentsDir: join(root, "global"), env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" },
+	});
+	const ctx = fakeContext();
+	ctx.modelRegistry.find = (provider, id) => id === "unavailable" ? undefined : { provider, id, reasoning: true };
+	ctx.modelRegistry.getApiKeyAndHeaders = async (model) => model.id === "no-auth"
+		? { ok: false, error: "missing key" } : { ok: true, apiKey: "test" };
+	runtime.startSession(ctx);
+	for (const [overrides, message] of [
+		[{ thinking: "extreme" }, /Invalid subagent thinking level/],
+		[{ model: "invalid" }, /expected provider\/model/],
+		[{ model: "p/" }, /expected provider\/model/],
+		[{ model: "p/unavailable" }, /not configured/],
+		[{ model: "p/no-auth" }, /missing key/],
+	]) {
+		await assert.rejects(() => runtime.launch({ agent: "worker", task: "Task", ...overrides }, ctx), message);
+		assert.equal(client.calls.some(([name]) => name === "createTab" || name === "createSplit"), false);
+	}
 	runtime.shutdown();
 });
 

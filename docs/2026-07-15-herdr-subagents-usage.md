@@ -22,11 +22,12 @@ Use the `subagent` tool or `/subagent` command:
 ```text
 /subagent explorer Find the authentication entry points
 /subagent reviewer --placement split Review the current diff
+/subagent worker --model openai-codex/gpt-6.0-astra --thinking high Task
 ```
 
 Bare `/subagent` opens an interactive role, placement, and task picker.
 
-Children open in background tabs by default. Pass `placement: "split"` to the tool or `--placement split` to the command for a sibling split. A launch returns after Pi is ready and the initial task has been submitted; the child continues asynchronously.
+Children open in background tabs by default. Pass `placement: "split"` to the tool or `--placement split` to the command for a sibling split. Optionally pass `model` (full `provider/model`) and/or `thinking` to the `subagent` tool, or `--model provider/model` and/or `--thinking level` before the command task. Thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Use `--` to start task text that begins with an option. Overrides apply only to that launch; the picker and role defaults remain unchanged. Model configuration and credentials are checked before creating a child surface. Pi may clamp the requested thinking level to what the selected model supports; launch results report that effective level. A launch returns after Pi is ready and the initial task has been submitted; the child continues asynchronously.
 
 Each child is a persistent interactive Pi session. Enter its Herdr pane to watch progress, answer questions, or continue the conversation directly. The extension does not close child panes after a response.
 

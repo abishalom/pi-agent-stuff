@@ -2,6 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { clampThinkingLevel } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadAgentCatalog } from "./agents.ts";
 import {
@@ -13,6 +14,7 @@ import {
 import { chooseSplitDirection, CliHerdrClient, controlNameFor } from "./herdr.ts";
 import { SubagentMonitorManager } from "./monitor.ts";
 import { SessionReaderStore } from "./session-reader.ts";
+import { isThinkingLevel, parseModelSpec } from "./types.ts";
 import type {
   AgentCatalog,
   HerdrClient,
@@ -36,12 +38,6 @@ export interface HerdrSubagentsOptions {
   globalAgentsDir?: string;
   debounceMs?: number;
   env?: NodeJS.ProcessEnv;
-}
-
-function modelParts(spec: string): { provider: string; id: string } | null {
-  const slash = spec.indexOf("/");
-  if (slash < 1 || slash === spec.length - 1) return null;
-  return { provider: spec.slice(0, slash), id: spec.slice(slash + 1) };
 }
 
 function safeLabel(value: string): string {
@@ -132,13 +128,14 @@ export class HerdrSubagentsRuntime implements SubagentController {
     await this.validation;
   }
 
-  private async validateModel(definition: { model: string }, ctx: ExtensionContext): Promise<void> {
-    const parts = modelParts(definition.model);
-    if (!parts) throw new Error(`Invalid subagent model ${definition.model}; expected provider/model`);
+  private async validateModel(spec: string, ctx: ExtensionContext) {
+    const parts = parseModelSpec(spec);
+    if (!parts) throw new Error(`Invalid subagent model ${spec}; expected provider/model`);
     const model = ctx.modelRegistry.find(parts.provider, parts.id);
-    if (!model) throw new Error(`Subagent model is not configured: ${definition.model}`);
+    if (!model) throw new Error(`Subagent model is not configured: ${spec}`);
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(`Subagent model credentials are unavailable for ${definition.model}: ${auth.error}`);
+    if (!auth.ok) throw new Error(`Subagent model credentials are unavailable for ${spec}: ${auth.error}`);
+    return model;
   }
 
   private uniqueLabel(base: string): string {
@@ -163,7 +160,11 @@ export class HerdrSubagentsRuntime implements SubagentController {
       throw new Error(`Unknown or invalid subagent role ${input.agent}. Available: ${known}`);
     }
     if (!input.task.trim()) throw new Error("Subagent task must not be empty");
-    await this.validateModel(definition, ctx);
+    const model = input.model ?? definition.model;
+    const thinking = input.thinking ?? definition.thinking;
+    if (!isThinkingLevel(thinking)) throw new Error(`Invalid subagent thinking level: ${thinking}`);
+    const selectedModel = await this.validateModel(model, ctx);
+    const effectiveThinking = clampThinkingLevel(selectedModel, thinking);
 
     const placement: Placement = input.placement ?? definition.placement ?? "tab";
     const label = this.uniqueLabel(safeLabel(input.name ?? roleLabel(definition.name, input.task)));
@@ -210,8 +211,8 @@ export class HerdrSubagentsRuntime implements SubagentController {
       const promptPath = join(promptDir, "role.md");
       await writeFile(promptPath, `${definition.body}\n`, { mode: 0o600 });
       const args = [
-        "--model", definition.model,
-        "--thinking", definition.thinking,
+        "--model", model,
+        "--thinking", effectiveThinking,
         ...(definition.tools.length ? ["--tools", definition.tools.join(",")] : ["--tools", ""]),
         "--append-system-prompt", promptPath,
       ];
@@ -234,8 +235,8 @@ export class HerdrSubagentsRuntime implements SubagentController {
         agentSourcePath: definition.sourcePath,
         label,
         placement,
-        model: definition.model,
-        thinking: definition.thinking,
+        model,
+        thinking: effectiveThinking,
         tools: definition.tools,
         sessionPath: prompted.sessionPath ?? sessionPath,
         status: prompted.status === "blocked" ? "blocked" : "working",

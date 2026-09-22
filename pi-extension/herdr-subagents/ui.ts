@@ -1,13 +1,15 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentCatalog, Placement, TrackedSubagent } from "./types.ts";
+import { isThinkingLevel, parseModelSpec, THINKING_LEVELS, type AgentCatalog, type Placement, type ThinkingLevel, type TrackedSubagent } from "./types.ts";
 
 export interface LaunchInput {
   agent: string;
   task: string;
   name?: string;
   placement?: Placement;
+  model?: string;
+  thinking?: ThinkingLevel;
   signal?: AbortSignal;
 }
 
@@ -23,6 +25,8 @@ export interface ParsedSubagentCommand {
   agent: string;
   task: string;
   placement?: Placement;
+  model?: string;
+  thinking?: ThinkingLevel;
 }
 
 function tokenize(value: string): string[] {
@@ -61,6 +65,8 @@ export function parseSubagentCommand(value: string): ParsedSubagentCommand | nul
   if (!tokens.length) return null;
   const agent = tokens.shift()!;
   let placement: Placement | undefined;
+  let model: string | undefined;
+  let thinking: ThinkingLevel | undefined;
   let parsingOptions = true;
   const task: string[] = [];
   while (tokens.length) {
@@ -69,11 +75,23 @@ export function parseSubagentCommand(value: string): ParsedSubagentCommand | nul
       parsingOptions = false;
       continue;
     }
-    if (parsingOptions && token === "--placement") {
-      if (placement) throw new Error("Duplicate --placement option");
-      const value = tokens.shift();
-      if (value !== "tab" && value !== "split") throw new Error("--placement must be tab or split");
-      placement = value;
+    if (parsingOptions && (token === "--placement" || token === "--model" || token === "--thinking")) {
+      if ((token === "--placement" && placement !== undefined) ||
+          (token === "--model" && model !== undefined) ||
+          (token === "--thinking" && thinking !== undefined)) throw new Error(`Duplicate ${token} option`);
+      const value = tokens[0];
+      if (value === undefined || value.startsWith("--")) throw new Error(`Missing value for ${token}`);
+      tokens.shift();
+      if (token === "--placement") {
+        if (value !== "tab" && value !== "split") throw new Error("--placement must be tab or split");
+        placement = value;
+      } else if (token === "--model") {
+        if (!parseModelSpec(value)) throw new Error("--model must be provider/model");
+        model = value;
+      } else {
+        if (!isThinkingLevel(value)) throw new Error(`Invalid --thinking level: ${value}`);
+        thinking = value;
+      }
       continue;
     }
     if (parsingOptions && token.startsWith("--")) throw new Error(`Unknown /subagent option: ${token}`);
@@ -82,8 +100,8 @@ export function parseSubagentCommand(value: string): ParsedSubagentCommand | nul
     task.push(...tokens);
     break;
   }
-  if (!task.length) throw new Error("Usage: /subagent <agent> [--placement tab|split] <task>");
-  return { agent, task: task.join(" "), ...(placement ? { placement } : {}) };
+  if (!task.length) throw new Error("Usage: /subagent <agent> [--placement tab|split] [--model provider/model] [--thinking level] <task>");
+  return { agent, task: task.join(" "), ...(placement ? { placement } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
 }
 
 const MAX_RESULT_RETRIEVAL_BYTES = 50 * 1024;
@@ -110,7 +128,7 @@ function toolResult(text: string, details: unknown = {}) {
 
 async function launchFromPicker(controller: SubagentController, ctx: ExtensionCommandContext): Promise<void> {
   if (ctx.mode !== "tui") {
-    ctx.ui.notify("Usage: /subagent <agent> [--placement tab|split] <task>", "warning");
+    ctx.ui.notify("Usage: /subagent <agent> [--placement tab|split] [--model provider/model] [--thinking level] <task>", "warning");
     return;
   }
   const catalog = controller.getCatalog();
@@ -141,6 +159,8 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
       task: Type.String({ description: "Initial task for the child" }),
       name: Type.Optional(Type.String({ description: "Human-facing Herdr label override" })),
       placement: Type.Optional(StringEnum(["tab", "split"] as const)),
+      model: Type.Optional(Type.String({ description: "Per-launch model override (provider/model)" })),
+      thinking: Type.Optional(StringEnum(THINKING_LEVELS)),
     }),
     async execute(_id, params, signal, _update, ctx) {
       if (signal?.aborted) throw new Error("Subagent launch cancelled");

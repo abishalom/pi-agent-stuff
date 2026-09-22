@@ -2,6 +2,18 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type Placement = "tab" | "split";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ThinkingLevel[];
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === "string" && THINKING_LEVELS.some((level) => level === value);
+}
+
+export function parseModelSpec(value: unknown): { provider: string; id: string } | null {
+  if (typeof value !== "string") return null;
+  const match = /^([^/\s]+)\/([^/\s]+(?:\/[^/\s]+)*)$/.exec(value);
+  return match ? { provider: match[1]!, id: match[2]! } : null;
+}
+
 export type AgentSource = "bundled" | "global" | "project";
 export type ChildStatus = "starting" | "working" | "blocked" | "settled" | "exited";
 export type HerdrStatus = "idle" | "working" | "blocked" | "done" | "unknown";
