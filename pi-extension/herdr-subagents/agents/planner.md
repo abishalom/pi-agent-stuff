@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Investigate requirements and produce an implementation plan
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-6-sol
 thinking: high
 placement: tab
 tools: read,bash

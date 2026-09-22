@@ -86,10 +86,10 @@ Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking 
 
 | Agent | Model | Thinking |
 |---|---|---|
-| `explorer` | `openai-codex/gpt-5.6-luna` | `low` |
-| `planner` | `openai-codex/gpt-5.6-sol` | `high` |
-| `worker` | `openai-codex/gpt-5.6-terra` | `medium` |
-| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` |
+| `explorer` | `openai-codex/gpt-6-luna` | `low` |
+| `planner` | `openai-codex/gpt-6-sol` | `high` |
+| `worker` | `openai-codex/gpt-6-sol` | `medium` |
+| `reviewer` | `openai-codex/gpt-6-sol` | `high` |
 
 ### `/cleanup-subagents`
 

@@ -34,10 +34,10 @@ Each child is a persistent interactive Pi session. Enter its Herdr pane to watch
 
 | Role | Model | Thinking | Tools | Purpose |
 |---|---|---|---|---|
-| `explorer` | `openai-codex/gpt-5.6-luna` | `low` | `read,bash` | Read-only reconnaissance |
-| `planner` | `openai-codex/gpt-5.6-sol` | `high` | `read,bash` | Investigation and implementation planning |
-| `worker` | `openai-codex/gpt-5.6-terra` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
-| `reviewer` | `openai-codex/gpt-5.6-sol` | `high` | `read,bash` | Read-only actionable review findings |
+| `explorer` | `openai-codex/gpt-6-luna` | `low` | `read,bash` | Read-only reconnaissance |
+| `planner` | `openai-codex/gpt-6-sol` | `high` | `read,bash` | Investigation and implementation planning |
+| `worker` | `openai-codex/gpt-6-sol` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
+| `reviewer` | `openai-codex/gpt-6-sol` | `high` | `read,bash` | Read-only actionable review findings |
 
 The resolved model/thinking policy comes from `config/subagent-model-overrides.json`. Trusted projects may override role definitions under `.pi/agents/`; global definitions live under Pi's agent directory. Use `subagents_list` to inspect resolved definitions and diagnostics.
 

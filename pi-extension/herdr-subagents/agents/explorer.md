@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Fast read-only codebase reconnaissance
-model: openai-codex/gpt-5.6-luna
+model: openai-codex/gpt-6-luna
 thinking: low
 placement: tab
 tools: read,bash

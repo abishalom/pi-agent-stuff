@@ -828,7 +828,7 @@ function fakePi() {
 }
 
 function fakeContext() {
-	const model = { provider: "openai-codex", id: "gpt-5.6-luna" };
+	const model = { provider: "openai-codex", id: "gpt-6-luna" };
 	return {
 		mode: "tui",
 		cwd: ROOT,
