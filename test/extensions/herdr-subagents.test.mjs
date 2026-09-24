@@ -78,7 +78,10 @@ test("bundled catalog resolves exactly four adapted roles and model policy", () 
 	assert.deepEqual(catalog.definitions.map((item) => item.name), ["explorer", "planner", "reviewer", "worker"]);
 	assert.equal(catalog.get("EXPLORER").thinking, "low");
 	assert.equal(catalog.get("explorer").placement, "tab");
-	assert.match(catalog.get("worker").body, /Nested delegation is unavailable/i);
+	assert.deepEqual(catalog.get("worker").delegates, ["explorer"]);
+	assert.deepEqual(catalog.get("planner").delegates, ["explorer"]);
+	assert.deepEqual(catalog.get("explorer").delegates, []);
+	assert.deepEqual(catalog.get("reviewer").delegates, []);
 	assert.match(catalog.get("worker").body, /hunk session comment list/i);
 	assert.match(catalog.get("reviewer").body, /hunk skill path/i);
 	assert.match(catalog.get("reviewer").body, /type user/i);
@@ -103,6 +106,7 @@ test("catalog enforces trust, precedence, duplicate diagnostics, and tool valida
 	await writeFile(join(project, "bad.md"), definition("bad", "bad", "missing"));
 	let catalog = loadAgentCatalog({ cwd: root, trusted: false, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read"] });
 	assert.equal(catalog.get("x").description, "global");
+	assert.deepEqual(catalog.get("x").delegates, []);
 	assert.equal(catalog.get("bad"), undefined);
 	catalog = loadAgentCatalog({ cwd: root, trusted: true, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read"] });
 	assert.equal(catalog.get("x").description, "project");
@@ -111,6 +115,9 @@ test("catalog enforces trust, precedence, duplicate diagnostics, and tool valida
 	catalog = loadAgentCatalog({ cwd: root, trusted: true, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read"] });
 	assert.equal(catalog.get("x"), undefined);
 	assert.equal(catalog.diagnostics.filter((item) => item.name === "x").length, 2);
+	await writeFile(join(project, "bad-delegates.md"), definition("bad-delegates", "invalid").replace("tools: read", "tools: read\ndelegates: not a role"));
+	catalog = loadAgentCatalog({ cwd: root, trusted: true, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read"] });
+	assert.match(catalog.diagnostics.find((item) => item.name === "bad-delegates").message, /delegates must/);
 });
 
 test("split geometry follows deterministic thresholds", () => {
@@ -910,6 +917,8 @@ test("runtime launches a default tab, waits for prompt submission, cleans prompt
 	const child = await runtime.launch({ agent: "explorer", task: "Find auth entry points" }, ctx);
 	assert.equal(child.placement, "tab");
 	assert.equal(child.paneId, "w1:p2");
+	assert.deepEqual(client.calls.find(([name]) => name === "createTab")[1].env,
+		{ PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "explorer", PI_HERDR_DEPTH: "1", PI_HERDR_DELEGATES: "0" });
 	assert.ok(client.calls.some(([name]) => name === "createTab"));
 	assert.ok(client.calls.some(([name, , message]) => name === "prompt" && message === "Find auth entry points"));
 	const start = client.calls.find(([name]) => name === "startPi")[1];
@@ -943,6 +952,8 @@ test("runtime resolves independent and combined launch overrides without changin
 		const child = await runtime.launch({ agent: "worker", task: "Task", ...overrides }, ctx);
 		const args = client.calls.find(([name]) => name === "startPi")[1].args;
 		assert.equal(child.model, overrides.model ?? defaults.model);
+		assert.equal(client.calls.find(([name]) => name === "createTab")[1].env.PI_HERDR_DELEGATES, "1");
+		assert.ok(args[args.indexOf("--tools") + 1].split(",").includes("subagent"));
 		assert.equal(child.thinking, overrides.thinking ?? defaults.thinking);
 		assert.equal(args[args.indexOf("--model") + 1], child.model);
 		assert.equal(args[args.indexOf("--thinking") + 1], child.thinking);
@@ -1033,6 +1044,7 @@ test("runtime honors explicit split placement and deterministic direction", asyn
 	assert.equal(child.placement, "split");
 	const split = client.calls.find(([name]) => name === "createSplit");
 	assert.equal(split[1].direction, "right");
+	assert.equal(split[1].env.PI_HERDR_DEPTH, "1");
 	runtime.shutdown();
 });
 
@@ -1060,14 +1072,61 @@ test("startup metadata timeout leaves the surface address, skips prompting, and 
 	runtime.shutdown();
 });
 
-test("child marker disables every orchestration registration", () => {
-	const registered = [];
-	const pi = {
-		registerTool(tool) { registered.push(tool.name); },
-		registerCommand(name) { registered.push(name); },
-		registerMessageRenderer(name) { registered.push(name); },
-		on(name) { registered.push(name); },
-	};
-	createHerdrSubagentsExtension({ env: { PI_HERDR_SUBAGENT: "1" } })(pi);
-	assert.deepEqual(registered, []);
+test("child sessions initialize delivery but register orchestration only when delegating below max depth", () => {
+	for (const [env, expected] of [
+		[{ PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "explorer", PI_HERDR_DEPTH: "1", PI_HERDR_DELEGATES: "0" }, false],
+		[{ PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "worker", PI_HERDR_DEPTH: "1", PI_HERDR_DELEGATES: "1" }, true],
+		[{ PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "worker", PI_HERDR_DEPTH: "2", PI_HERDR_DELEGATES: "1" }, false],
+	]) {
+		const registered = [];
+		const pi = {
+			registerTool(tool) { registered.push(tool.name); },
+			registerCommand(name) { registered.push(name); },
+			registerMessageRenderer(name) { registered.push(name); },
+			on(name) { registered.push(name); },
+		};
+		createHerdrSubagentsExtension({ env })(pi);
+		assert.equal(registered.includes("subagent"), expected);
+		assert.ok(registered.includes("session_start"));
+		assert.ok(registered.includes("agent_settled"));
+		assert.ok(registered.includes("context"));
+	}
+});
+
+test("nested launch enforces direct role permissions and depth before surface creation", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "grandchild.jsonl");
+	await writeFile(path, `${JSON.stringify({ type: "session", version: 3 })}\n`);
+	for (const role of ["planner", "worker", "explorer", "reviewer"]) {
+		const client = new FakeHerdrClient(path);
+		const runtime = new HerdrSubagentsRuntime(fakePi(), {
+			clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
+			globalAgentsDir: join(root, "global"),
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: role, PI_HERDR_DEPTH: "1" },
+		});
+		const ctx = fakeContext();
+		runtime.startSession(ctx);
+		assert.deepEqual(runtime.getCatalog().definitions.map((item) => item.name), role === "planner" || role === "worker" ? ["explorer"] : []);
+		await assert.rejects(() => runtime.launch({ agent: "worker", task: "forbidden" }, ctx), /cannot delegate/);
+		assert.equal(client.calls.some(([name]) => name === "createTab"), false);
+		if (role === "planner" || role === "worker") {
+			await runtime.launch({ agent: "explorer", task: "inspect" }, ctx);
+			assert.equal(client.calls.find(([name]) => name === "createTab")[1].env.PI_HERDR_DEPTH, "2");
+			await assert.rejects(() => runtime.getResult("w1:not-owned"), /not a child owned/);
+		} else {
+			await assert.rejects(() => runtime.launch({ agent: "explorer", task: "inspect" }, ctx), /cannot delegate/);
+		}
+		runtime.shutdown();
+	}
+	const client = new FakeHerdrClient(path);
+	const runtime = new HerdrSubagentsRuntime(fakePi(), {
+		clientFactory: () => client, bundledDir: BUNDLED, policyPath: POLICY,
+		globalAgentsDir: join(root, "global"),
+		env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "worker", PI_HERDR_DEPTH: "2" },
+	});
+	runtime.startSession(fakeContext());
+	await assert.rejects(() => runtime.launch({ agent: "explorer", task: "no" }, fakeContext()), /depth limit/);
+	assert.equal(client.calls.some(([name]) => name === "createTab"), false);
+	runtime.shutdown();
 });

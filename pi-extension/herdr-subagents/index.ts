@@ -25,6 +25,8 @@ import type {
 import { registerSubagentsUI, type LaunchInput, type SubagentController } from "./ui.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const ORCHESTRATION_TOOLS = ["subagent", "subagent_followup", "subagent_interrupt", "get_subagent_result", "subagents_list"];
+const MAX_DEPTH = 2;
 const EMPTY_CATALOG: AgentCatalog = {
   definitions: [],
   diagnostics: [],
@@ -73,6 +75,8 @@ export class HerdrSubagentsRuntime implements SubagentController {
   private readonly reservedLabels = new Set<string>();
   private readonly runtimeAbort = new AbortController();
   private catalog: AgentCatalog = EMPTY_CATALOG;
+  private readonly depth: number;
+  private readonly role?: string;
   private parentPaneId?: string;
   private parentWorkspaceId?: string;
   private validation?: Promise<void>;
@@ -83,6 +87,8 @@ export class HerdrSubagentsRuntime implements SubagentController {
     this.pi = pi;
     this.options = options;
     this.env = options.env ?? process.env;
+    this.role = this.env.PI_HERDR_SUBAGENT === "1" ? this.env.PI_HERDR_AGENT : undefined;
+    this.depth = this.env.PI_HERDR_SUBAGENT === "1" ? Number(this.env.PI_HERDR_DEPTH) : 0;
     this.client = options.clientFactory?.(pi) ?? new CliHerdrClient(pi);
     this.delivery = new DeliveryScheduler(pi, options.debounceMs ?? 500);
     this.monitor = new SubagentMonitorManager(this.client, this.delivery, this.readers);
@@ -103,7 +109,10 @@ export class HerdrSubagentsRuntime implements SubagentController {
   }
 
   getCatalog(): AgentCatalog {
-    return this.catalog;
+    if (!this.role) return this.catalog;
+    const allowed = new Set(this.catalog.get(this.role)?.delegates ?? []);
+    const definitions = this.catalog.definitions.filter((item) => allowed.has(item.name));
+    return { ...this.catalog, definitions, get: (name) => definitions.find((item) => item.name === name.trim().toLowerCase()) };
   }
 
   private async validateEnvironment(ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
@@ -150,6 +159,15 @@ export class HerdrSubagentsRuntime implements SubagentController {
   async launch(input: LaunchInput, ctx: ExtensionContext): Promise<TrackedSubagent> {
     if (this.closed) throw new Error("This parent subagent runtime has shut down");
     this.delivery.setContext(ctx);
+    if (!Number.isInteger(this.depth) || this.depth < 0 || this.depth >= MAX_DEPTH) {
+      throw new Error(`Subagent depth limit reached (maximum ${MAX_DEPTH})`);
+    }
+    if (this.env.PI_HERDR_SUBAGENT === "1") {
+      const allowed = (this.role && this.catalog.get(this.role)?.delegates) || [];
+      if (!allowed.includes(input.agent.trim().toLowerCase())) {
+        throw new Error(`Role ${this.role ?? "unknown"} cannot delegate to ${input.agent}`);
+      }
+    }
     const signal = input.signal
       ? AbortSignal.any([this.runtimeAbort.signal, input.signal])
       : this.runtimeAbort.signal;
@@ -174,6 +192,15 @@ export class HerdrSubagentsRuntime implements SubagentController {
     const parentWorkspaceId = this.parentWorkspaceId!;
     let surface: Awaited<ReturnType<HerdrClient["createTab"]>> | undefined;
     let promptDir: string | undefined;
+    const childEnv = {
+      PI_HERDR_SUBAGENT: "1",
+      PI_HERDR_AGENT: definition.name,
+      PI_HERDR_DEPTH: String(this.depth + 1),
+      PI_HERDR_DELEGATES: definition.delegates.length && this.depth + 1 < MAX_DEPTH ? "1" : "0",
+    };
+    const tools = childEnv.PI_HERDR_DELEGATES === "1"
+      ? [...new Set([...definition.tools, ...ORCHESTRATION_TOOLS])]
+      : definition.tools;
 
     try {
       if (placement === "split") {
@@ -184,14 +211,14 @@ export class HerdrSubagentsRuntime implements SubagentController {
           parentPaneId,
           direction,
           cwd: ctx.cwd,
-          env: { PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: definition.name },
+          env: childEnv,
         }, signal);
       } else {
         surface = await this.client.createTab({
           workspaceId: parentWorkspaceId,
           cwd: ctx.cwd,
           label,
-          env: { PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: definition.name },
+          env: childEnv,
         }, signal);
       }
 
@@ -213,7 +240,7 @@ export class HerdrSubagentsRuntime implements SubagentController {
       const args = [
         "--model", model,
         "--thinking", effectiveThinking,
-        ...(definition.tools.length ? ["--tools", definition.tools.join(",")] : ["--tools", ""]),
+        "--tools", tools.join(","),
         "--append-system-prompt", promptPath,
       ];
       const started = await this.client.startPi({
@@ -237,7 +264,7 @@ export class HerdrSubagentsRuntime implements SubagentController {
         placement,
         model,
         thinking: effectiveThinking,
-        tools: definition.tools,
+        tools,
         sessionPath: prompted.sessionPath ?? sessionPath,
         status: prompted.status === "blocked" ? "blocked" : "working",
         queuedFollowups: [],
@@ -289,11 +316,13 @@ export class HerdrSubagentsRuntime implements SubagentController {
 export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {}) {
   return function herdrSubagentsExtension(pi: ExtensionAPI): void {
     const env = options.env ?? process.env;
-    if (env.PI_HERDR_SUBAGENT === "1") return;
+    const child = env.PI_HERDR_SUBAGENT === "1";
+    const depth = Number(env.PI_HERDR_DEPTH);
+    const canDelegate = !child || (env.PI_HERDR_DELEGATES === "1" && Number.isInteger(depth) && depth > 0 && depth < MAX_DEPTH);
 
     const runtime = new HerdrSubagentsRuntime(pi, options);
     pi.registerMessageRenderer(DELIVERY_CUSTOM_TYPE, renderDeliveryMessage);
-    registerSubagentsUI(pi, runtime);
+    if (canDelegate) registerSubagentsUI(pi, runtime);
     pi.on("session_start", (_event, ctx) => runtime.startSession(ctx));
     pi.on("context", (event) => ({ messages: pruneDigestedDeliveryMessages(event.messages) }));
     pi.on("agent_settled", (_event, ctx) => runtime.parentSettled(ctx));

@@ -40,6 +40,7 @@ interface AgentFrontmatter extends Record<string, unknown> {
   thinking?: unknown;
   placement?: unknown;
   tools?: unknown;
+  delegates?: unknown;
 }
 
 interface AgentOverride {
@@ -133,11 +134,13 @@ function parseCandidate(
   const rawThinking = overrideThinking ?? stringField(parsed.frontmatter.thinking) ?? parentThinking;
   const rawPlacement = stringField(parsed.frontmatter.placement) ?? "tab";
   const tools = parseTools(parsed.frontmatter.tools);
+  const delegates = parseTools(parsed.frontmatter.delegates);
 
   if (!description) errors.push("missing required frontmatter field: description");
   if (!model) errors.push("model is required after policy overlay");
   if (!VALID_THINKING.has(rawThinking as ThinkingLevel)) errors.push(`invalid thinking level: ${rawThinking}`);
   if (!VALID_PLACEMENT.has(rawPlacement as Placement)) errors.push(`invalid placement: ${rawPlacement}`);
+  if (!delegates || delegates.some((role) => !VALID_NAME.test(role))) errors.push("delegates must be a comma-separated list of role names");
   if (!tools) {
     errors.push("tools must be a comma-separated string");
   } else {
@@ -170,6 +173,7 @@ function parseCandidate(
       thinking: rawThinking as ThinkingLevel,
       placement: rawPlacement as Placement,
       tools: tools!,
+      delegates: delegates!,
       body: parsed.body.trim(),
       source,
       sourcePath: path,

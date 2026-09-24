@@ -34,6 +34,7 @@ export interface AgentDefinition {
   thinking: ThinkingLevel;
   placement: Placement;
   tools: string[];
+  delegates: string[];
   body: string;
   source: AgentSource;
   sourcePath: string;

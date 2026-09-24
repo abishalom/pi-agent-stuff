@@ -53,7 +53,7 @@ The policy is authoritative: it overlays matching fields from the winning agent 
 - Children persist after every turn instead of auto-exiting.
 - No parent status widget; Herdr is the status and navigation UI.
 - No `/plan`, `/iterate`, `subagent_done`, or `caller_ping`.
-- No parent-context forks, worktrees, scheduling, workflow DSL, or nested delegation.
+- No parent-context forks, worktrees, scheduling, or workflow DSL. Nested delegation is opt-in, limited to depth 2.
 - No automatic retry or model fallback.
 - No registry reconstruction after `/reload` or parent-session replacement.
 - No automatic child surface cleanup.
@@ -111,7 +111,8 @@ Recognized fields:
 | `model` | no | Required after model-policy overlay |
 | `thinking` | no | Defaults to the parent thinking level |
 | `placement` | no | `tab` or `split`; default `tab` |
-| `tools` | no | Comma-separated Pi tool allowlist passed through to `--tools` |
+| `tools` | no | Comma-separated Pi tool allowlist passed through to `--tools`; delegation tools are added for eligible children |
+| `delegates` | no | Comma-separated role names this role may launch; missing or empty means none |
 
 The body is appended to Pi's normal system prompt and project instructions. Unknown frontmatter fields are ignored with no promised behavior.
 
@@ -137,9 +138,9 @@ Resolution order:
 2. Overlay `config/subagent-model-overrides.json` for that normalized role name.
 3. Apply the parent thinking level only if thinking remains unset.
 4. Apply placement default `tab` if placement remains unset.
-5. Validate model, thinking, placement, and tool names.
+5. Validate model, thinking, placement, tool names, and delegates syntax.
 
-`subagents_list` returns resolved definitions with source, source path, model, thinking, placement, tools, and any discovery diagnostics. Running children remain visible through Herdr rather than being mixed into this contract.
+`subagents_list` returns resolved definitions with source, source path, model, thinking, placement, tools, delegates, and any discovery diagnostics. Running children remain visible through Herdr rather than being mixed into this contract.
 
 ## 5. Bundled roles and prompt adaptation
 
@@ -154,7 +155,7 @@ Ship four bundled definitions:
 
 Do not copy the upstream prompts verbatim. Write new prompts for the Herdr runtime with these requirements:
 
-- Never instruct a child to spawn another subagent; nested delegation is unavailable.
+- Only roles with `delegates` frontmatter may launch the named roles, up to depth 2; bundled planner and worker may launch explorer only.
 - Never require a tool excluded by the role allowlist.
 - Do not instruct the child to exit after a response. It remains open for direct interaction and follow-ups.
 - Do not assume todo, commit, artifact, or browser-control skills are available.
@@ -323,9 +324,11 @@ Child environment:
 ```text
 PI_HERDR_SUBAGENT=1
 PI_HERDR_AGENT=<agent-name>
+PI_HERDR_DEPTH=<1-or-2>
+PI_HERDR_DELEGATES=<0-or-1>
 ```
 
-When `PI_HERDR_SUBAGENT=1`, this extension registers no orchestration tools, command, monitors, or metadata of its own, disabling nested delegation through this extension.
+The root is depth 0. Children initialize their own runtime and delivery; only those with delegation enabled below depth 2 register orchestration tools. Launch checks the current role's resolved `delegates` allowlist and depth, independently of tool visibility. Each runtime tracks and delivers results only for its direct children.
 
 ## 9. Lifecycle monitoring
 

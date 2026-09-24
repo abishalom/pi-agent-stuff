@@ -40,6 +40,8 @@ Each child is a persistent interactive Pi session. Enter its Herdr pane to watch
 | `worker` | `openai-codex/gpt-6-sol` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
 | `reviewer` | `openai-codex/gpt-6-sol` | `high` | `read,bash` | Read-only actionable review findings |
 
+Planner and worker may each launch explorer children (depth 2) for read-only reconnaissance. Explorer and reviewer are leaves. Root (depth 0) can launch any resolved role. Agent frontmatter `delegates: explorer` opts a role into delegating to that role; missing or empty means none. Child tools include orchestration only when delegation is enabled, and runtime checks role permissions and the depth-2 limit even if a tool is invoked directly.
+
 The resolved model/thinking policy comes from `config/subagent-model-overrides.json`. Trusted projects may override role definitions under `.pi/agents/`; global definitions live under Pi's agent directory. Use `subagents_list` to inspect resolved definitions and diagnostics.
 
 ## Parent control tools
@@ -65,7 +67,7 @@ Use `get_subagent_result` only when the compact handoff omitted needed detail. R
 
 - Children share the parent checkout; do not run concurrent writing workers unless their files are known to be disjoint.
 - Child tool allowlists reduce accidental mutation but are not a security sandbox, especially when `bash` is available.
-- Nested subagent delegation is disabled in children.
+- Each runtime owns only its direct children; grandchild handoffs go to their immediate parent, not the root. Control tools cannot address descendants owned by another runtime.
 - `/reload`, `/new`, `/resume`, `/fork`, and parent exit stop monitoring but leave child panes and Pi processes running for direct use.
 - V1 does not reconnect surviving children, create worktrees, retry failed models, or auto-close surfaces.
 
