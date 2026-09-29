@@ -56,6 +56,10 @@ Use this repo to curate what gets loaded. Do not also install the same resource 
 
 ## Updating dependencies
 
+Pi supplies `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox` at runtime. Declare any of these that this package uses as `"*"` peer dependencies, never as runtime dependencies. Development copies belong in `devDependencies` for local tests; the Pi development dependencies here target 0.99.1.
+
+`npm update` stays within the declared version ranges. When upgrading Pi across a minor version, update the Pi development dependency ranges too, then install and test.
+
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
 npm update
@@ -87,9 +91,9 @@ Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking 
 | Agent | Model | Thinking |
 |---|---|---|
 | `explorer` | `openai-codex/gpt-6-luna` | `low` |
-| `planner` | `openai-codex/gpt-6-sol` | `high` |
-| `worker` | `openai-codex/gpt-6-sol` | `medium` |
-| `reviewer` | `openai-codex/gpt-6-sol` | `high` |
+| `planner` | `openai-codex/gpt-6.1-sol` | `high` |
+| `worker` | `openai-codex/gpt-6.1-sol` | `medium` |
+| `reviewer` | `openai-codex/gpt-6.1-sol` | `high` |
 
 ### `/cleanup-subagents`
 

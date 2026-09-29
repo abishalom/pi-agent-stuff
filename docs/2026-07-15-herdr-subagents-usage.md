@@ -36,9 +36,9 @@ Each child is a persistent interactive Pi session. Enter its Herdr pane to watch
 | Role | Model | Thinking | Tools | Purpose |
 |---|---|---|---|---|
 | `explorer` | `openai-codex/gpt-6-luna` | `low` | `read,bash` | Read-only reconnaissance |
-| `planner` | `openai-codex/gpt-6-sol` | `high` | `read,bash` | Investigation and implementation planning |
-| `worker` | `openai-codex/gpt-6-sol` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
-| `reviewer` | `openai-codex/gpt-6-sol` | `high` | `read,bash` | Read-only actionable review findings |
+| `planner` | `openai-codex/gpt-6.1-sol` | `high` | `read,bash` | Investigation and implementation planning |
+| `worker` | `openai-codex/gpt-6.1-sol` | `medium` | `read,bash,write,edit` | Focused implementation and validation |
+| `reviewer` | `openai-codex/gpt-6.1-sol` | `high` | `read,bash` | Read-only actionable review findings |
 
 Planner and worker may each launch explorer children (depth 2) for read-only reconnaissance. Explorer and reviewer are leaves. Root (depth 0) can launch any resolved role. Agent frontmatter `delegates: explorer` opts a role into delegating to that role; missing or empty means none. Child tools include orchestration only when delegation is enabled, and runtime checks role permissions and the depth-2 limit even if a tool is invoked directly.
 

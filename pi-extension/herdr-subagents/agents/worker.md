@@ -1,7 +1,7 @@
 ---
 name: worker
 description: Implement and validate a focused coding task
-model: openai-codex/gpt-6-sol
+model: openai-codex/gpt-6.1-sol
 thinking: medium
 placement: tab
 tools: read,bash,write,edit

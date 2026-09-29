@@ -1,6 +1,6 @@
 {
   "planner": {
-    "model": "openai-codex/gpt-6-sol",
+    "model": "openai-codex/gpt-6.1-sol",
     "thinking": "high"
   },
   "explorer": {
@@ -8,11 +8,11 @@
     "thinking": "low"
   },
   "worker": {
-    "model": "openai-codex/gpt-6-sol",
+    "model": "openai-codex/gpt-6.1-sol",
     "thinking": "medium"
   },
   "reviewer": {
-    "model": "openai-codex/gpt-6-sol",
+    "model": "openai-codex/gpt-6.1-sol",
     "thinking": "high"
   }
 }

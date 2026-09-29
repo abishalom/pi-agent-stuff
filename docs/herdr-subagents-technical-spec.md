@@ -41,9 +41,9 @@ Retain the policy in `config/subagent-model-overrides.json`, migrated to the fou
 | Agent | Model | Thinking |
 |---|---|---|
 | `explorer` | `openai-codex/gpt-6-luna` | `low` |
-| `planner` | `openai-codex/gpt-6-sol` | `high` |
-| `worker` | `openai-codex/gpt-6-sol` | `medium` |
-| `reviewer` | `openai-codex/gpt-6-sol` | `high` |
+| `planner` | `openai-codex/gpt-6.1-sol` | `high` |
+| `worker` | `openai-codex/gpt-6.1-sol` | `medium` |
+| `reviewer` | `openai-codex/gpt-6.1-sol` | `high` |
 
 The policy is authoritative: it overlays matching fields from the winning agent definition.
 
@@ -149,9 +149,9 @@ Ship four bundled definitions:
 | Role | Model | Thinking | Placement | Tools | Responsibility |
 |---|---|---|---|---|---|
 | `explorer` | `openai-codex/gpt-6-luna` | `low` | `tab` | `read,bash` | Inspect and report; never modify files |
-| `planner` | `openai-codex/gpt-6-sol` | `high` | `tab` | `read,bash` | Investigate, clarify consequential decisions, and produce a plan; never implement |
-| `worker` | `openai-codex/gpt-6-sol` | `medium` | `tab` | `read,bash,write,edit` | Implement and validate the assigned task |
-| `reviewer` | `openai-codex/gpt-6-sol` | `high` | `tab` | `read,bash` | Inspect and report actionable findings; never modify files |
+| `planner` | `openai-codex/gpt-6.1-sol` | `high` | `tab` | `read,bash` | Investigate, clarify consequential decisions, and produce a plan; never implement |
+| `worker` | `openai-codex/gpt-6.1-sol` | `medium` | `tab` | `read,bash,write,edit` | Implement and validate the assigned task |
+| `reviewer` | `openai-codex/gpt-6.1-sol` | `high` | `tab` | `read,bash` | Inspect and report actionable findings; never modify files |
 
 Do not copy the upstream prompts verbatim. Write new prompts for the Herdr runtime with these requirements:
 

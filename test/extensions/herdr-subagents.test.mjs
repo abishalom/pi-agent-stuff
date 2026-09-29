@@ -58,10 +58,11 @@ function jsonLine(value) {
 	return `${JSON.stringify(value)}\n`;
 }
 
-test("manifest replaces upstream subagents and declares runtime schema dependency", () => {
+test("manifest replaces upstream subagents and uses the host-provided schema package", () => {
 	assert.ok(packageJson.pi.extensions.includes("./pi-extension/herdr-subagents/index.ts"));
 	assert.ok(!packageJson.dependencies["pi-interactive-subagents"]);
-	assert.equal(packageJson.dependencies.typebox, "^1.3.7");
+	assert.equal(packageJson.dependencies.typebox, undefined);
+	assert.equal(packageJson.peerDependencies.typebox, "*");
 	assert.ok(!packageJson.pi.extensions.some((value) => value.includes("subagent-model-overrides")));
 });
 
@@ -86,6 +87,27 @@ test("bundled catalog resolves exactly four adapted roles and model policy", () 
 	assert.match(catalog.get("reviewer").body, /hunk skill path/i);
 	assert.match(catalog.get("reviewer").body, /type user/i);
 	assert.equal(catalog.diagnostics.length, 0);
+});
+
+test("bundled defaults and model policy select GPT-6.1 Sol while preserving thinking levels and Luna", () => {
+	for (const policyPath of [POLICY, join(ROOT, "does-not-exist.json")]) {
+		const catalog = loadAgentCatalog({
+			cwd: ROOT,
+			trusted: false,
+			bundledDir: BUNDLED,
+			policyPath,
+			parentThinking: "minimal",
+			availableTools: BUILTIN_TOOLS,
+			globalAgentsDir: join(ROOT, "does-not-exist"),
+		});
+		for (const [role, thinking] of [["planner", "high"], ["worker", "medium"], ["reviewer", "high"]]) {
+			assert.equal(catalog.get(role).model, "openai-codex/gpt-6.1-sol");
+			assert.equal(catalog.get(role).thinking, thinking);
+		}
+		assert.equal(catalog.get("explorer").model, "openai-codex/gpt-6-luna");
+		assert.equal(catalog.get("explorer").thinking, "low");
+		assert.equal(catalog.diagnostics.length, 0);
+	}
 });
 
 test("catalog enforces trust, precedence, duplicate diagnostics, and tool validation", async (t) => {
