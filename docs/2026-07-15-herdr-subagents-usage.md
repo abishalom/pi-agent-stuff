@@ -48,12 +48,22 @@ The resolved model/thinking policy comes from `config/subagent-model-overrides.j
 
 - `subagent_followup`: submit a follow-up immediately or queue it FIFO behind active work.
 - `subagent_interrupt`: send Escape to a working child without closing its pane or Pi process.
+- `subagent_status({paneId})`: return live Herdr lifecycle status plus a timestamped **last-reported**, not live, child context estimate (`tokens`, `contextWindow`, `percent`, model and reporting reason). `context: null` means no snapshot; null metrics mean unknown, not zero.
+- `subagent_compact({paneId,instructions?})`: submit Pi's built-in `/compact` with optional instructions normalized to one line. Only owned live idle/done children without queued follow-ups are eligible. Working, blocked, unknown and exited children are rejected; nothing is interrupted or queued. The result is **requested**, not completed.
 - `get_subagent_result`: retrieve the latest completed response once without waiting. The default model-visible limit is 16 KiB and callers may request up to 50 KiB.
 - `subagents_list`: show resolved role definitions and discovery diagnostics.
 
 Control tools accept only pane IDs launched by the current parent runtime. They reject unrelated panes and children surviving an earlier `/reload`, session replacement, or parent process.
 
 A blocked child may be displaying a selector or permission prompt. Follow-ups are queued, and interrupts require direct pane interaction rather than blindly injecting text or Escape.
+
+## Context management
+
+Aim for child context under **40%** at natural task/message boundaries as a soft orchestration target, not a hard limit. When a settled child's measured context is above target, request compaction before its next task when practical. Never STOP, abandon work, interrupt a running child, or poll to maintain this target. Avoid repeated compaction loops; unknown usage is not evidence of low usage. These shared tool guidelines apply to custom/overridden roles as well as bundled roles. A child can control only its own children, not invoke the parent-side compaction tool on itself.
+
+Context snapshots use `ctx.getContextUsage()` and non-model-context custom session entries. Every child reports on session start, final settlement, successful compaction, model changes and tree navigation, even when it cannot delegate. The parent reads the latest report from the session JSONL, never inferring active context from file size, historical tokens or usage totals. Reports can lag active work or persistence (including before the first prompt creates the session file). Missing reports from older children remain unknown. Immediately after compaction Pi normally reports unknown tokens/percent until a subsequent model response; the context window may still be known.
+
+Compaction submission does not confirm success or completion. Herdr can remain idle throughout compaction, so idle is **not** a completion barrier and compact-then-followup is **not synchronized**. Child `session_compact` and `session_compact_failed` hooks persist non-model-context terminal outcome entries, including manual/threshold/overflow reason and failure or cancellation information. The existing monitor relays each new outcome once through automatic handoffs: an idle parent wakes, while a busy parent receives it after settlement. Finish the parent turn and wait for that notification before the next task when needed; this is not a synchronous compact-then-followup barrier. Leaves report too. Status/result retrieval does not consume these notifications or replace the latest assistant response. Historical outcomes and same-path replacement history are baselined, and exit reconciliation scans persisted outcomes. There is no completion wait tool, automatic retry/compaction policy, or polling workflow. Older children without these hooks cannot report outcomes; process death before persistence may leave only an exit notification. Direct pane interaction can race the parent's eligibility check; the child Pi/Herdr command remains authoritative.
 
 ## Result delivery
 

@@ -32,6 +32,148 @@ const BUNDLED = join(ROOT, "pi-extension/herdr-subagents/agents");
 const POLICY = join(ROOT, "config/subagent-model-overrides.json");
 const BUILTIN_TOOLS = ["read", "bash", "write", "edit"];
 
+const contextEntry = (data) => ({ type: "custom", customType: "herdr-subagent-context", data });
+const compactionEntry = (id, outcome = "success", extra = {}) => ({
+	type: "custom", id, customType: "herdr-subagent-compaction",
+	data: { timestamp: new Date().toISOString(), outcome, reason: "manual", willRetry: false, fromExtension: false, ...extra },
+});
+
+test("compaction CLI submission is no-wait, normalized, cancellable, and does not require a pane result", async () => {
+	const calls = [];
+	const client = new CliHerdrClient({ async exec(command, args, options) {
+		calls.push({ command, args, options });
+		return { code: 0, stdout: JSON.stringify({ result: { accepted: true } }), stderr: "" };
+	} });
+	const signal = new AbortController().signal;
+	await client.requestCompaction("p:2", "  preserve\n decisions\r\n and\t paths  ", signal);
+	await client.requestCompaction("p:2", " \n ");
+	await client.requestCompaction("p:2");
+	assert.deepEqual(calls.map((call) => call.args), [
+		["agent", "prompt", "p:2", "/compact preserve decisions and paths"],
+		["agent", "prompt", "p:2", "/compact"],
+		["agent", "prompt", "p:2", "/compact"],
+	]);
+	assert.equal(calls[0].options.signal, signal);
+});
+
+test("compaction requires an owned live settled child and neither interrupts nor queues", async (t) => {
+	const client = new LifecycleHerdrClient();
+	const requests = [];
+	client.requestCompaction = async (...args) => requests.push(args);
+	const delivery = new DeliveryScheduler({ sendMessage() {} });
+	const manager = new SubagentMonitorManager(client, delivery);
+	t.after(() => { manager.shutdown(); delivery.shutdown(); });
+	const child = trackedChild(undefined);
+	manager.track(child);
+	await assert.rejects(() => manager.compact("foreign"), /not a child owned/);
+	for (const status of ["working", "blocked", "unknown"]) {
+		client.status = status;
+		await assert.rejects(() => manager.compact(child.paneId), /requires idle\/settled/);
+	}
+	for (const status of ["idle", "done"]) {
+		client.status = status;
+		assert.deepEqual(await manager.compact(child.paneId, "retain paths"), { paneId: child.paneId, requested: true });
+	}
+	child.queuedFollowups.push("pending");
+	await assert.rejects(() => manager.compact(child.paneId), /queued follow-ups/);
+	child.queuedFollowups.length = 0;
+	const abort = new AbortController();
+	abort.abort();
+	await assert.rejects(() => manager.compact(child.paneId, undefined, abort.signal));
+	child.status = "exited";
+	await assert.rejects(() => manager.compact(child.paneId), /exited/);
+	child.status = "settled";
+	client.alive = false;
+	await assert.rejects(() => manager.compact(child.paneId), /no longer running/);
+	assert.equal(requests.length, 2);
+	assert.ok(requests[0][2] instanceof AbortSignal);
+	assert.equal(client.escapes, 0);
+	assert.deepEqual(client.prompts, []);
+	assert.deepEqual(child.queuedFollowups, []);
+});
+
+test("status exposes latest timestamped child snapshot, preserves unknowns, and resets on replacement", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "context.jsonl");
+	const readers = new SessionReaderStore();
+	assert.equal(await readers.get(path).latestContext(), null);
+	const snapshot = { timestamp: "2026-07-15T12:00:00.000Z", reason: "agent_settled", tokens: 45000, contextWindow: 100000, percent: 45, model: "p/m" };
+	await writeFile(path, jsonLine(contextEntry(snapshot)));
+	await readers.get(path).baseline();
+	const delivery = new DeliveryScheduler({ sendMessage() {} });
+	const client = new LifecycleHerdrClient(path);
+	client.status = "idle";
+	const manager = new SubagentMonitorManager(client, delivery, readers);
+	t.after(() => { manager.shutdown(); delivery.shutdown(); });
+	manager.track(trackedChild(path));
+	assert.deepEqual(await manager.status("w1:p2"), { paneId: "w1:p2", status: "idle", contextSource: "last-reported", context: snapshot });
+	await assert.rejects(() => manager.status("foreign"), /not a child owned/);
+	const unknown = { ...snapshot, reason: "session_compact", tokens: null, percent: null };
+	await appendFile(path, jsonLine(contextEntry(unknown)));
+	assert.deepEqual((await manager.status("w1:p2")).context, unknown);
+	await appendFile(path, jsonLine({ ...contextEntry(snapshot), type: "custom_message" }) + jsonLine({ type: "usage", usage: { totalTokens: 999999 } }));
+	assert.deepEqual(await readers.get(path).latestContext(), unknown);
+	await appendFile(path, jsonLine(contextEntry({ ...snapshot, tokens: 0, percent: 0 })));
+	assert.equal((await readers.get(path).latestContext()).percent, 0);
+	await appendFile(path, jsonLine(contextEntry({ timestamp: snapshot.timestamp, reason: "model_select" })));
+	assert.deepEqual(await readers.get(path).latestContext(), { timestamp: snapshot.timestamp, reason: "model_select", tokens: null, contextWindow: null, percent: null, model: null });
+	await appendFile(path, jsonLine(contextEntry({ ...snapshot, timestamp: "invalid" })));
+	assert.equal((await readers.get(path).latestContext()).tokens, null);
+	const replacement = join(root, "replacement");
+	await writeFile(replacement, jsonLine({ type: "session" }));
+	await rename(replacement, path);
+	assert.equal(await readers.get(path).latestContext(), null);
+});
+
+test("leaf children report context without delegation, including compaction and model changes", () => {
+	const handlers = new Map();
+	const entries = [];
+	const pi = { ...fakePi(), registerMessageRenderer() {}, on(name, handler) { handlers.set(name, handler); },
+		appendEntry(customType, data) { entries.push({ customType, data }); } };
+	createHerdrSubagentsExtension({ env: { PI_HERDR_SUBAGENT: "1", PI_HERDR_DELEGATES: "0" } })(pi);
+	let usage = { tokens: 45000, contextWindow: 100000, percent: 45 };
+	const ctx = { ...fakeContext(), model: { provider: "p", id: "m" }, getContextUsage: () => usage };
+	handlers.get("session_start")({}, ctx);
+	handlers.get("agent_settled")({}, ctx);
+	usage = { tokens: null, contextWindow: 100000, percent: null };
+	handlers.get("session_compact")({ reason: "manual", willRetry: false, fromExtension: false }, ctx);
+	handlers.get("session_compact_failed")({ reason: "threshold", aborted: false, errorMessage: "Provider unavailable", willRetry: false, fromExtension: false }, ctx);
+	handlers.get("session_compact_failed")({ reason: "overflow", aborted: true, willRetry: true, fromExtension: true }, ctx);
+	usage = undefined;
+	handlers.get("model_select")({}, ctx);
+	handlers.get("session_tree")({}, ctx);
+	const outcomes = entries.filter((entry) => entry.customType === "herdr-subagent-compaction");
+	assert.deepEqual(outcomes.map((entry) => entry.data.outcome), ["success", "failure", "aborted"]);
+	assert.deepEqual(outcomes.map((entry) => entry.data.reason), ["manual", "threshold", "overflow"]);
+	assert.equal(outcomes[1].data.errorMessage, "Provider unavailable");
+	assert.equal(outcomes[2].data.willRetry, true);
+	entries.splice(0, entries.length, ...entries.filter((entry) => entry.customType === "herdr-subagent-context"));
+	assert.deepEqual(entries.map((entry) => entry.data.reason), ["session_start", "agent_settled", "session_compact", "model_select", "session_tree"]);
+	assert.ok(entries.every((entry) => entry.customType === "herdr-subagent-context" && Number.isFinite(Date.parse(entry.data.timestamp))));
+	assert.equal(entries[1].data.percent, 45);
+	assert.equal(entries[2].data.tokens, null);
+	assert.equal(entries[3].data.contextWindow, null);
+	handlers.get("session_shutdown")();
+});
+
+test("new control tools forward cancellation and give honest compaction/context guidance", async () => {
+	const tools = new Map();
+	const signal = new AbortController().signal;
+	const calls = [];
+	registerSubagentsUI({ registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} }, {
+		async compact(...args) { calls.push(args); return { paneId: args[0], requested: true }; },
+		async status(...args) { calls.push(args); return { paneId: args[0], status: "idle", contextSource: "last-reported", context: null }; },
+	});
+	const result = await tools.get("subagent_compact").execute("id", { paneId: "p2", instructions: "retain paths" }, signal);
+	assert.deepEqual(calls[0], ["p2", "retain paths", signal]);
+	assert.match(result.content[0].text, /completion is not confirmed/);
+	const status = await tools.get("subagent_status").execute("id", { paneId: "p2" }, signal);
+	assert.deepEqual(calls[1], ["p2", signal]);
+	assert.equal(status.details.context, null);
+	assert.match(tools.get("subagent").promptGuidelines.join(" "), /under 40%.*soft target/);
+});
+
 async function temporaryDirectory() {
 	return mkdtemp(join(tmpdir(), "herdr-subagents-test-"));
 }
@@ -140,6 +282,14 @@ test("catalog enforces trust, precedence, duplicate diagnostics, and tool valida
 	await writeFile(join(project, "bad-delegates.md"), definition("bad-delegates", "invalid").replace("tools: read", "tools: read\ndelegates: not a role"));
 	catalog = loadAgentCatalog({ cwd: root, trusted: true, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read"] });
 	assert.match(catalog.diagnostics.find((item) => item.name === "bad-delegates").message, /delegates must/);
+	for (const tool of ["subagent_compact", "subagent_status"]) {
+		await writeFile(join(project, `${tool}.md`), definition(tool, "invalid", tool));
+	}
+	catalog = loadAgentCatalog({ cwd: root, trusted: true, bundledDir: bundled, globalAgentsDir: global, policyPath: join(root, "none.json"), parentThinking: "low", availableTools: ["read", "subagent_compact", "subagent_status"] });
+	for (const tool of ["subagent_compact", "subagent_status"]) {
+		assert.equal(catalog.get(tool), undefined);
+		assert.match(catalog.diagnostics.find((item) => item.name === tool).message, /nested orchestration tools are unavailable/);
+	}
 });
 
 test("split geometry follows deterministic thresholds", () => {
@@ -715,6 +865,113 @@ function trackedChild(sessionPath, status = "working") {
 	};
 }
 
+test("compaction reader baselines history, deduplicates concurrent scans, and keeps results independent", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "events.jsonl");
+	await writeFile(path, jsonLine(compactionEntry("historical")));
+	const reader = new IncrementalSessionReader(path);
+	await reader.baseline();
+	assert.deepEqual(await reader.scanUnseenCompactions(), []);
+	const fresh = compactionEntry("fresh");
+	await appendFile(path, jsonLine(fresh) + jsonLine(fresh) + jsonLine(assistantEntry("result", "stop", "response"))
+		+ jsonLine({ type: "compaction", id: "summary", summary: "not a response" })
+		+ jsonLine({ ...compactionEntry("not-custom"), type: "custom_message" })
+		+ jsonLine(compactionEntry("invalid", "success", { reason: "bogus" })));
+	await reader.latestContext();
+	assert.equal((await reader.latest()).text, "response");
+	assert.equal((await reader.scanUnseen()).length, 1);
+	const scans = await Promise.all([reader.scanUnseenCompactions(), reader.scanUnseenCompactions()]);
+	assert.deepEqual(scans.flat().map((event) => event.entryId), ["fresh"]);
+	const replacement = join(root, "replacement");
+	await writeFile(replacement, jsonLine(compactionEntry("replacement-history")));
+	await rename(replacement, path);
+	assert.deepEqual(await reader.scanUnseenCompactions(), []);
+	await appendFile(path, jsonLine(compactionEntry("new-after-replace", "aborted")));
+	assert.equal((await reader.scanUnseenCompactions())[0].outcome, "aborted");
+});
+
+for (const outcome of ["success", "failure", "aborted"]) {
+	test(`compaction ${outcome} hook wakes idle parent even without a child lifecycle transition`, async (t) => {
+		const root = await temporaryDirectory();
+		t.after(() => rm(root, { recursive: true, force: true }));
+		const path = join(root, "child.jsonl");
+		await writeFile(path, "");
+		const readers = new SessionReaderStore();
+		await readers.get(path).baseline();
+		const sent = [];
+		const delivery = new DeliveryScheduler({ sendMessage(message, options) { sent.push({ message, options }); } }, 1);
+		delivery.setContext({ isIdle: () => true });
+		const client = new LifecycleHerdrClient(path);
+		client.status = "idle";
+		const manager = new SubagentMonitorManager(client, delivery, readers);
+		t.after(() => { manager.shutdown(); delivery.shutdown(); });
+		const child = trackedChild(path, "settled");
+		manager.track(child);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const handlers = new Map();
+		const entries = [];
+		createHerdrSubagentsExtension({ env: { PI_HERDR_SUBAGENT: "1", PI_HERDR_DELEGATES: "0" } })({
+			...fakePi(), registerMessageRenderer() {}, on(name, handler) { handlers.set(name, handler); },
+			appendEntry(customType, data) { entries.push({ type: "custom", id: `hook-${entries.length}`, customType, data }); },
+		});
+		const event = { reason: "manual", willRetry: false, fromExtension: false, aborted: outcome === "aborted", errorMessage: outcome === "failure" ? "Provider unavailable" : undefined };
+		handlers.get(outcome === "success" ? "session_compact" : "session_compact_failed")(event, { getContextUsage: () => undefined });
+		await appendFile(path, entries.map(jsonLine).join(""));
+		// Simulate the existing monitor wait timeout, not a status transition.
+		for (const waiter of client.waiters.splice(0)) waiter.resolve(client.info());
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(sent.length, 1);
+		assert.equal(sent[0].options.triggerTurn, true);
+		assert.equal(sent[0].message.details.events[0].compaction.outcome, outcome);
+		assert.match(sent[0].message.content, outcome === "success" ? /succeeded.*manual/ : outcome === "failure" ? /failed.*Provider unavailable/ : /canceled or aborted/);
+		assert.equal(child.latestResult, undefined);
+		assert.equal(child.resultDeliveryStates.size, 0);
+		handlers.get("session_shutdown")();
+	});
+}
+
+test("busy parent defers compaction delivery; status/result retrieval cannot consume it; exit scans final events", async (t) => {
+	const root = await temporaryDirectory();
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "child.jsonl");
+	await writeFile(path, "");
+	const readers = new SessionReaderStore();
+	await readers.get(path).baseline();
+	const sent = [];
+	let idle = false;
+	const ctx = { isIdle: () => idle };
+	const delivery = new DeliveryScheduler({ sendMessage(message) { sent.push(message); } }, 1);
+	delivery.setContext(ctx);
+	const client = new LifecycleHerdrClient(path);
+	client.status = "idle";
+	const manager = new SubagentMonitorManager(client, delivery, readers);
+	t.after(() => { manager.shutdown(); delivery.shutdown(); });
+	const child = trackedChild(path, "settled");
+	manager.track(child);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	await appendFile(path, jsonLine(assistantEntry("response", "stop", "assistant answer")) + jsonLine(compactionEntry("compact")));
+	assert.equal((await manager.getResult(child.paneId)).result.text, "assistant answer");
+	await manager.status(child.paneId);
+	for (const waiter of client.waiters.splice(0)) waiter.resolve(client.info());
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(sent.length, 0);
+	assert.equal(child.latestResult.text, "assistant answer");
+	idle = true;
+	delivery.parentSettled(ctx);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(sent.length, 1);
+	assert.equal(sent[0].details.events.length, 1);
+	assert.equal(sent[0].details.events[0].kind, "compaction_success");
+	await appendFile(path, jsonLine(compactionEntry("final", "failure", { errorMessage: "Provider failed" })));
+	client.alive = false;
+	for (const waiter of client.waiters.splice(0)) waiter.resolve(null);
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(sent.length, 2);
+	assert.match(sent[1].content, /Provider failed/);
+	assert.equal(child.status, "exited");
+});
+
 test("monitor delivers JSONL completion even when working transition was missed", async (t) => {
 	const root = await temporaryDirectory();
 	t.after(() => rm(root, { recursive: true, force: true }));
@@ -975,7 +1232,9 @@ test("runtime resolves independent and combined launch overrides without changin
 		const args = client.calls.find(([name]) => name === "startPi")[1].args;
 		assert.equal(child.model, overrides.model ?? defaults.model);
 		assert.equal(client.calls.find(([name]) => name === "createTab")[1].env.PI_HERDR_DELEGATES, "1");
-		assert.ok(args[args.indexOf("--tools") + 1].split(",").includes("subagent"));
+		for (const name of ["subagent", "subagent_compact", "subagent_status"]) {
+			assert.ok(args[args.indexOf("--tools") + 1].split(",").includes(name));
+		}
 		assert.equal(child.thinking, overrides.thinking ?? defaults.thinking);
 		assert.equal(args[args.indexOf("--model") + 1], child.model);
 		assert.equal(args[args.indexOf("--thinking") + 1], child.thinking);
@@ -1109,6 +1368,10 @@ test("child sessions initialize delivery but register orchestration only when de
 		};
 		createHerdrSubagentsExtension({ env })(pi);
 		assert.equal(registered.includes("subagent"), expected);
+		assert.equal(registered.includes("subagent_compact"), expected);
+		assert.equal(registered.includes("subagent_status"), expected);
+		assert.ok(registered.includes("session_compact"));
+		assert.ok(registered.includes("session_compact_failed"));
 		assert.ok(registered.includes("session_start"));
 		assert.ok(registered.includes("agent_settled"));
 		assert.ok(registered.includes("context"));

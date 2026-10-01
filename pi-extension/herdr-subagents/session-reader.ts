@@ -1,5 +1,43 @@
 import { open, stat } from "node:fs/promises";
-import type { ChildResult, ResultClassification } from "./types.ts";
+import { COMPACTION_CUSTOM_TYPE, CONTEXT_CUSTOM_TYPE, type ChildCompactionEvent, type ChildContextSnapshot, type ChildResult, type ResultClassification } from "./types.ts";
+
+function parseContextSnapshot(value: unknown): ChildContextSnapshot | undefined {
+  const data = asRecord(value);
+  if (!data || typeof data.timestamp !== "string" || !Number.isFinite(Date.parse(data.timestamp))) return undefined;
+  const reason = data.reason;
+  if (reason !== "session_start" && reason !== "agent_settled" && reason !== "session_compact"
+    && reason !== "model_select" && reason !== "session_tree") return undefined;
+  const metric = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+  const tokens = metric(data.tokens);
+  const window = metric(data.contextWindow);
+  return {
+    timestamp: data.timestamp,
+    reason,
+    tokens,
+    contextWindow: window !== null && window > 0 ? window : null,
+    percent: tokens === null ? null : metric(data.percent),
+    model: typeof data.model === "string" ? data.model : null,
+  };
+}
+
+function parseCompactionEvent(entry: Record<string, unknown>): ChildCompactionEvent | undefined {
+  const data = asRecord(entry.data);
+  if (typeof entry.id !== "string" || !data || typeof data.timestamp !== "string"
+    || !Number.isFinite(Date.parse(data.timestamp))) return undefined;
+  if (data.outcome !== "success" && data.outcome !== "failure" && data.outcome !== "aborted") return undefined;
+  if (data.reason !== "manual" && data.reason !== "threshold" && data.reason !== "overflow") return undefined;
+  if (typeof data.willRetry !== "boolean" || typeof data.fromExtension !== "boolean") return undefined;
+  return {
+    entryId: entry.id,
+    timestamp: data.timestamp,
+    outcome: data.outcome,
+    reason: data.reason,
+    willRetry: data.willRetry,
+    fromExtension: data.fromExtension,
+    errorMessage: typeof data.errorMessage === "string" ? data.errorMessage : undefined,
+  };
+}
 
 interface AssistantEntry {
   id: string;
@@ -57,12 +95,15 @@ function classify(entry: AssistantEntry, parentInterrupted: boolean): ResultClas
 export class IncrementalSessionReader {
   readonly path: string;
   private offset = 0;
+  private contextSnapshot: ChildContextSnapshot | null = null;
   private trailing = Buffer.alloc(0);
   private inode?: number;
   private readonly entries = new Map<string, AssistantEntry>();
   private readonly order: string[] = [];
   private readonly delivered = new Set<string>();
   private readonly baselined = new Set<string>();
+  private readonly compactionEvents = new Map<string, ChildCompactionEvent>();
+  private readonly deliveredCompactions = new Set<string>();
   private readonly userMessageIndexes: number[] = [];
   private nextMessageIndex = 0;
   private operationTail: Promise<void> = Promise.resolve();
@@ -75,7 +116,9 @@ export class IncrementalSessionReader {
     this.offset = 0;
     this.trailing = Buffer.alloc(0);
     this.inode = nextInode;
+    this.contextSnapshot = null;
     this.entries.clear();
+    this.compactionEvents.clear();
     this.order.length = 0;
     this.userMessageIndexes.length = 0;
     this.nextMessageIndex = 0;
@@ -131,6 +174,14 @@ export class IncrementalSessionReader {
           throw new Error(`Malformed child session JSONL in ${this.path}: ${String(error)}`);
         }
         const parsedEntry = asRecord(parsed);
+        if (parsedEntry?.type === "custom" && parsedEntry.customType === CONTEXT_CUSTOM_TYPE) {
+          const snapshot = parseContextSnapshot(parsedEntry.data);
+          if (snapshot) this.contextSnapshot = snapshot;
+        }
+        if (parsedEntry?.type === "custom" && parsedEntry.customType === COMPACTION_CUSTOM_TYPE) {
+          const event = parseCompactionEvent(parsedEntry);
+          if (event && !this.compactionEvents.has(event.entryId)) this.compactionEvents.set(event.entryId, event);
+        }
         const parsedMessage = asRecord(parsedEntry?.message);
         if (parsedEntry?.type !== "message" || typeof parsedEntry.id !== "string" || !parsedMessage) continue;
         const messageIndex = this.nextMessageIndex++;
@@ -143,6 +194,7 @@ export class IncrementalSessionReader {
       }
       this.trailing = combined.subarray(start);
       if (replaced) {
+        for (const id of this.compactionEvents.keys()) this.deliveredCompactions.add(id);
         for (const id of this.order) {
           this.delivered.add(id);
           this.baselined.add(id);
@@ -157,13 +209,34 @@ export class IncrementalSessionReader {
     await this.runExclusive(() => this.refreshUnlocked());
   }
 
+  async latestContext(): Promise<ChildContextSnapshot | null> {
+    return this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      return this.contextSnapshot ? { ...this.contextSnapshot } : null;
+    });
+  }
+
   async baseline(): Promise<void> {
     await this.runExclusive(async () => {
       await this.refreshUnlocked();
+      for (const id of this.compactionEvents.keys()) this.deliveredCompactions.add(id);
       for (const id of this.order) {
         this.delivered.add(id);
         this.baselined.add(id);
       }
+    });
+  }
+
+  async scanUnseenCompactions(): Promise<ChildCompactionEvent[]> {
+    return this.runExclusive(async () => {
+      await this.refreshUnlocked();
+      const events: ChildCompactionEvent[] = [];
+      for (const [id, event] of this.compactionEvents) {
+        if (this.deliveredCompactions.has(id)) continue;
+        this.deliveredCompactions.add(id);
+        events.push({ ...event });
+      }
+      return events;
     });
   }
 

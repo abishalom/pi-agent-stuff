@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ContextUsage, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type Placement = "tab" | "split";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -71,6 +71,45 @@ export interface PaneRect {
   y?: number;
 }
 
+export const CONTEXT_CUSTOM_TYPE = "herdr-subagent-context";
+export const COMPACTION_CUSTOM_TYPE = "herdr-subagent-compaction";
+
+/** Terminal Pi hook outcome; not an assistant response or a completion barrier. */
+export interface ChildCompactionOutcome {
+  timestamp: string;
+  outcome: "success" | "failure" | "aborted";
+  reason: "manual" | "threshold" | "overflow";
+  willRetry: boolean;
+  fromExtension: boolean;
+  errorMessage?: string;
+}
+
+export interface ChildCompactionEvent extends ChildCompactionOutcome {
+  entryId: string;
+}
+
+/** Child-reported estimate, never a live parent-side measurement. */
+export interface ChildContextSnapshot {
+  timestamp: string;
+  reason: "session_start" | "agent_settled" | "session_compact" | "model_select" | "session_tree";
+  tokens: ContextUsage["tokens"];
+  contextWindow: ContextUsage["contextWindow"] | null;
+  percent: ContextUsage["percent"];
+  model: string | null;
+}
+
+export interface SubagentStatus {
+  paneId: string;
+  status: HerdrStatus | "exited";
+  contextSource: "last-reported";
+  context: ChildContextSnapshot | null;
+}
+
+export interface CompactionRequest {
+  paneId: string;
+  requested: true;
+}
+
 export interface HerdrClient {
   validate(signal?: AbortSignal): Promise<void>;
   currentPane(signal?: AbortSignal): Promise<PaneInfo>;
@@ -97,6 +136,7 @@ export interface HerdrClient {
     timeoutMs: number;
   }, signal?: AbortSignal): Promise<PaneInfo>;
   prompt(paneId: string, message: string, signal?: AbortSignal): Promise<PaneInfo>;
+  requestCompaction(paneId: string, instructions?: string, signal?: AbortSignal): Promise<void>;
   getAgent(paneId: string, signal?: AbortSignal): Promise<PaneInfo | null>;
   getPane(paneId: string, signal?: AbortSignal): Promise<PaneInfo | null>;
   waitAgent(paneId: string, statuses: HerdrStatus[], timeoutMs: number, signal?: AbortSignal): Promise<PaneInfo | null>;
@@ -116,7 +156,9 @@ export interface ChildResult {
 }
 
 export interface DeliveryEvent {
-  kind: "completion" | "blocked" | "interrupted" | "incomplete" | "failure" | "exited" | "closed";
+  kind: "completion" | "blocked" | "interrupted" | "incomplete" | "failure" | "exited" | "closed" | "compaction_success" | "compaction_failure";
+  compactionEntryId?: string;
+  compaction?: ChildCompactionOutcome;
   paneId: string;
   entryId?: string;
   label: string;

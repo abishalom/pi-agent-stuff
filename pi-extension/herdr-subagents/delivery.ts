@@ -47,7 +47,7 @@ function formatElapsed(milliseconds: number): string {
 }
 
 function icon(kind: DeliveryEvent["kind"]): string {
-  if (kind === "completion") return "✓";
+  if (kind === "completion" || kind === "compaction_success") return "✓";
   if (kind === "blocked") return "?";
   if (kind === "interrupted") return "■";
   if (kind === "incomplete") return "…";
@@ -126,7 +126,7 @@ export function renderDeliveryMessage(
   const events = message.details?.events ?? [];
   const lines: string[] = [];
   for (const event of events) {
-    const color = event.kind === "completion" ? "success"
+    const color = event.kind === "completion" || event.kind === "compaction_success" ? "success"
       : event.kind === "blocked" || event.kind === "incomplete" ? "warning"
         : "error";
     lines.push(theme.fg(color, `${icon(event.kind)} ${event.label}`)

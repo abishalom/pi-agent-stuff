@@ -14,7 +14,7 @@ import {
 import { chooseSplitDirection, CliHerdrClient, controlNameFor } from "./herdr.ts";
 import { SubagentMonitorManager } from "./monitor.ts";
 import { SessionReaderStore } from "./session-reader.ts";
-import { isThinkingLevel, parseModelSpec } from "./types.ts";
+import { COMPACTION_CUSTOM_TYPE, type ChildCompactionOutcome, CONTEXT_CUSTOM_TYPE, isThinkingLevel, parseModelSpec, type ChildContextSnapshot, type CompactionRequest, type SubagentStatus } from "./types.ts";
 import type {
   AgentCatalog,
   HerdrClient,
@@ -25,7 +25,7 @@ import type {
 import { registerSubagentsUI, type LaunchInput, type SubagentController } from "./ui.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
-const ORCHESTRATION_TOOLS = ["subagent", "subagent_followup", "subagent_interrupt", "get_subagent_result", "subagents_list"];
+const ORCHESTRATION_TOOLS = ["subagent", "subagent_followup", "subagent_interrupt", "subagent_compact", "subagent_status", "get_subagent_result", "subagents_list"];
 const MAX_DEPTH = 2;
 const EMPTY_CATALOG: AgentCatalog = {
   definitions: [],
@@ -298,6 +298,14 @@ export class HerdrSubagentsRuntime implements SubagentController {
     return this.monitor.getResult(paneId);
   }
 
+  compact(paneId: string, instructions?: string, signal?: AbortSignal): Promise<CompactionRequest> {
+    return this.monitor.compact(paneId, instructions, signal ? AbortSignal.any([signal, this.runtimeAbort.signal]) : this.runtimeAbort.signal);
+  }
+
+  status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus> {
+    return this.monitor.status(paneId, signal ? AbortSignal.any([signal, this.runtimeAbort.signal]) : this.runtimeAbort.signal);
+  }
+
   parentSettled(ctx: ExtensionContext): void {
     this.delivery.parentSettled(ctx);
   }
@@ -323,9 +331,49 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
     const runtime = new HerdrSubagentsRuntime(pi, options);
     pi.registerMessageRenderer(DELIVERY_CUSTOM_TYPE, renderDeliveryMessage);
     if (canDelegate) registerSubagentsUI(pi, runtime);
-    pi.on("session_start", (_event, ctx) => runtime.startSession(ctx));
+    const reportContext = (ctx: ExtensionContext, reason: ChildContextSnapshot["reason"]) => {
+      if (!child) return;
+      const usage = ctx.getContextUsage();
+      pi.appendEntry<ChildContextSnapshot>(CONTEXT_CUSTOM_TYPE, {
+        timestamp: new Date().toISOString(),
+        reason,
+        tokens: usage?.tokens ?? null,
+        contextWindow: usage?.contextWindow ?? null,
+        percent: usage?.percent ?? null,
+        model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+      });
+    };
+    pi.on("session_start", (_event, ctx) => {
+      runtime.startSession(ctx);
+      reportContext(ctx, "session_start");
+    });
+    pi.on("session_compact", (event, ctx) => {
+      if (child) pi.appendEntry<ChildCompactionOutcome>(COMPACTION_CUSTOM_TYPE, {
+        timestamp: new Date().toISOString(),
+        outcome: "success",
+        reason: event.reason,
+        willRetry: event.willRetry,
+        fromExtension: event.fromExtension,
+      });
+      reportContext(ctx, "session_compact");
+    });
+    pi.on("session_compact_failed", (event) => {
+      if (child) pi.appendEntry<ChildCompactionOutcome>(COMPACTION_CUSTOM_TYPE, {
+        timestamp: new Date().toISOString(),
+        outcome: event.aborted ? "aborted" : "failure",
+        reason: event.reason,
+        willRetry: event.willRetry,
+        fromExtension: event.fromExtension,
+        errorMessage: event.errorMessage,
+      });
+    });
+    pi.on("model_select", (_event, ctx) => reportContext(ctx, "model_select"));
+    pi.on("session_tree", (_event, ctx) => reportContext(ctx, "session_tree"));
     pi.on("context", (event) => ({ messages: pruneDigestedDeliveryMessages(event.messages) }));
-    pi.on("agent_settled", (_event, ctx) => runtime.parentSettled(ctx));
+    pi.on("agent_settled", (_event, ctx) => {
+      reportContext(ctx, "agent_settled");
+      runtime.parentSettled(ctx);
+    });
     pi.on("session_shutdown", () => runtime.shutdown());
   };
 }

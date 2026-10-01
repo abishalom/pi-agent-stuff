@@ -29,6 +29,8 @@ const ORCHESTRATION_TOOLS = new Set([
   "subagent",
   "subagent_followup",
   "subagent_interrupt",
+  "subagent_compact",
+  "subagent_status",
   "get_subagent_result",
   "subagents_list",
 ]);

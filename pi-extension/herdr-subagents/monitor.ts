@@ -2,6 +2,8 @@ import type { DeliveryScheduler } from "./delivery.ts";
 import { SessionReaderStore } from "./session-reader.ts";
 import type {
   ChildResult,
+  CompactionRequest,
+  SubagentStatus,
   DeliveryEvent,
   HerdrClient,
   HerdrStatus,
@@ -88,7 +90,18 @@ export class SubagentMonitorManager {
 
   private async scanResults(child: TrackedSubagent): Promise<number> {
     if (!child.sessionPath) return 0;
-    const results = await this.readers.get(child.sessionPath).scanUnseen(
+    const reader = this.readers.get(child.sessionPath);
+    for (const event of await reader.scanUnseenCompactions()) {
+      const { entryId, ...compaction } = event;
+      const outcome = event.outcome === "success" ? "succeeded"
+        : event.outcome === "aborted" ? "was canceled or aborted" : "failed";
+      this.delivery.enqueue(this.event(child, event.outcome === "success" ? "compaction_success" : "compaction_failure", {
+        compactionEntryId: entryId,
+        compaction,
+        text: `Child compaction ${outcome} (${event.reason}).${event.errorMessage ? ` ${event.errorMessage}` : ""}`,
+      }));
+    }
+    const results = await reader.scanUnseen(
       child.interruptEpisodeSeq !== undefined,
       child.interruptBaselineMessageIndex,
     );
@@ -264,6 +277,31 @@ export class SubagentMonitorManager {
       }
       throw error;
     }
+  }
+
+  async compact(paneId: string, instructions?: string, signal?: AbortSignal): Promise<CompactionRequest> {
+    const child = this.requireOwned(paneId);
+    if (this.closed || child.status === "exited") throw new Error(`Child ${paneId} has exited`);
+    const operationSignal = signal ? AbortSignal.any([signal, child.monitorAbort.signal]) : child.monitorAbort.signal;
+    operationSignal.throwIfAborted();
+    const current = await this.client.getAgent(paneId, operationSignal);
+    if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
+    if (!isSettled(current.status)) throw new Error(`Cannot compact child ${paneId} while status is ${current.status}; requires idle/settled`);
+    if (child.queuedFollowups.length) throw new Error(`Cannot compact child ${paneId} with queued follow-ups`);
+    operationSignal.throwIfAborted();
+    await this.client.requestCompaction(paneId, instructions, operationSignal);
+    return { paneId, requested: true };
+  }
+
+  async status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus> {
+    const child = this.requireOwned(paneId);
+    // Unlike compaction, status remains useful after exit; do not use the
+    // monitor's already-aborted signal in that case.
+    signal?.throwIfAborted();
+    const current = await this.client.getAgent(paneId, signal);
+    if (current?.sessionPath) await this.setSessionPath(child, current.sessionPath);
+    const context = child.sessionPath ? await this.readers.get(child.sessionPath).latestContext() : null;
+    return { paneId, status: current?.status ?? "exited", contextSource: "last-reported", context };
   }
 
   async interrupt(paneId: string): Promise<{ interrupted: boolean; status: string }> {

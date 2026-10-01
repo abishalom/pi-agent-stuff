@@ -84,7 +84,7 @@ If this repo is the source of truth, do **not** install a second copy of these b
 
 ## Subagents in this repo
 
-`pi-extension/herdr-subagents` launches persistent Pi children in background Herdr tabs by default, with an explicit split override. Use `/subagent`, the `subagent` tool, `subagent_followup`, `subagent_interrupt`, `get_subagent_result`, and `subagents_list`. Exact responses are extracted from child session JSONL and relayed to the parent.
+`pi-extension/herdr-subagents` launches persistent Pi children in background Herdr tabs by default, with an explicit split override. Use `/subagent`, the `subagent` tool, `subagent_followup`, `subagent_interrupt`, `subagent_compact`, `subagent_status`, `get_subagent_result`, and `subagents_list`. Exact responses and hook-reported compaction success/failure/cancellation outcomes are extracted from child session JSONL and relayed to the parent. Compaction submission remains asynchronous; finish the parent turn to wait for its notification without polling.
 
 Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking policy lives in `config/subagent-model-overrides.json`. See `docs/2026-07-15-herdr-subagents-usage.md`.
 

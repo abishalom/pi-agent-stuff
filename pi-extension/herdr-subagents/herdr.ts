@@ -300,6 +300,14 @@ export class CliHerdrClient implements HerdrClient {
     return parsePaneInfo(paneFromResult(result));
   }
 
+  async requestCompaction(paneId: string, instructions?: string, signal?: AbortSignal): Promise<void> {
+    const normalized = instructions?.replace(/\s+/g, " ").trim();
+    // /compact does not necessarily transition Herdr out of idle. Only submit;
+    // waiting for working/idle cannot establish compaction completion.
+    await this.run(["agent", "prompt", paneId, normalized ? `/compact ${normalized}` : "/compact"],
+      { signal, timeout: 5000 });
+  }
+
   private async getAgentWithin(paneId: string, timeoutMs: number, signal?: AbortSignal): Promise<PaneInfo | null> {
     try {
       const result = this.result(await this.run(["agent", "get", paneId], { signal, timeout: Math.max(1, timeoutMs) }));

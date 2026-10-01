@@ -1,7 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isThinkingLevel, parseModelSpec, THINKING_LEVELS, type AgentCatalog, type Placement, type ThinkingLevel, type TrackedSubagent } from "./types.ts";
+import { isThinkingLevel, parseModelSpec, THINKING_LEVELS, type AgentCatalog, type CompactionRequest, type SubagentStatus, type Placement, type ThinkingLevel, type TrackedSubagent } from "./types.ts";
 
 export interface LaunchInput {
   agent: string;
@@ -19,6 +19,8 @@ export interface SubagentController {
   followup(paneId: string, message: string): Promise<unknown>;
   interrupt(paneId: string): Promise<unknown>;
   getResult(paneId: string): Promise<unknown>;
+  compact(paneId: string, instructions?: string, signal?: AbortSignal): Promise<CompactionRequest>;
+  status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus>;
 }
 
 export interface ParsedSubagentCommand {
@@ -154,6 +156,10 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
     label: "Launch Subagent",
     description: "Launch a persistent interactive Pi child in a Herdr tab (default) or split. The call waits for startup and task submission, not completion. After launch, end the current turn immediately; do not poll with sleep, herdr pane read, or loops. You will be resumed automatically when the child emits a handoff. Children share the current checkout; avoid concurrent writers.",
     promptSnippet: "Launch a persistent Herdr-hosted Pi subagent. After launching, do not poll with sleep, herdr pane read, or loops; finish this turn. You will be resumed automatically when the child emits a handoff.",
+    promptGuidelines: [
+      "At natural child task/message boundaries, aim for child context under 40% as a soft target, not a hard limit. Use subagent_status for last-reported estimates when practical; null means unknown. Never STOP, abandon work, interrupt a running child, or poll to maintain this target.",
+      "Before the next task, when a settled child is measured above 40%, request subagent_compact when practical. Avoid repeated compaction loops. Submission does not confirm completion; Herdr idle may persist during compaction, so compact-then-followup is not synchronized. Finish your turn and wait for the automatic success/failure notification before the next task when needed; do not poll. These parent-side tools control only your owned children, never yourself.",
+    ],
     parameters: Type.Object({
       agent: Type.String({ description: "Resolved agent role name" }),
       task: Type.String({ description: "Initial task for the child" }),
@@ -192,6 +198,28 @@ export function registerSubagentsUI(pi: ExtensionAPI, controller: SubagentContro
     async execute(_id, params) {
       const result = await controller.followup(params.paneId, params.message);
       return toolResult(`Follow-up for ${params.paneId}: ${(result as { status?: string }).status ?? "accepted"}`, result);
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_compact",
+    label: "Request Subagent Compaction",
+    description: "Request built-in /compact on an owned live idle/settled child, optionally with summary instructions. Rejects working, blocked, unknown, exited, or queued children; never interrupts or queues. Returns requested, not completed. Automatic success/failure handoffs wake an idle parent or arrive after it settles; finish your turn to wait without polling. Herdr may stay idle during compaction: this does not synchronize a subsequent follow-up. Cannot compact yourself.",
+    parameters: Type.Object({ paneId: Type.String(), instructions: Type.Optional(Type.String()) }),
+    async execute(_id, params, signal) {
+      const result = await controller.compact(params.paneId, params.instructions, signal);
+      return toolResult(`Compaction requested for ${params.paneId}; completion is not confirmed. Finish your turn to wait for the automatic success/failure notification without polling. Herdr idle may persist during compaction; a subsequent follow-up is not synchronized.`, result);
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_status",
+    label: "Subagent Status",
+    description: "Read an owned child's live Herdr lifecycle status and timestamped last-reported context estimate (not live context usage). Null means unknown, not zero. Use at natural boundaries, not in polling loops.",
+    parameters: Type.Object({ paneId: Type.String() }),
+    async execute(_id, params, signal) {
+      const result = await controller.status(params.paneId, signal);
+      return toolResult(JSON.stringify(result), result);
     },
   });
 
