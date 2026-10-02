@@ -12,15 +12,6 @@ interface ConversationMessage {
 	stopReason?: string;
 }
 
-interface MessageEntry {
-	type: string;
-	message?: ConversationMessage;
-}
-
-function isMessageEntry(entry: unknown): entry is MessageEntry {
-	return !!entry && typeof entry === "object" && "type" in entry;
-}
-
 function isConversationMessage(message: unknown): message is ConversationMessage {
 	return !!message && typeof message === "object";
 }
@@ -35,7 +26,7 @@ function getTextContent(message: ConversationMessage): string[] {
 function getBranchMessages(ctx: ExtensionContext): ConversationMessage[] {
 	return ctx.sessionManager
 		.getBranch()
-		.filter((entry): entry is MessageEntry => isMessageEntry(entry) && entry.type === "message")
+		.filter((entry) => entry.type === "message")
 		.map((entry) => entry.message)
 		.filter(isConversationMessage);
 }
@@ -45,7 +36,7 @@ function getLastAssistantText(ctx: ExtensionContext): string {
 
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];
-		if (!isMessageEntry(entry) || entry.type !== "message" || !isConversationMessage(entry.message)) {
+		if (entry.type !== "message" || !isConversationMessage(entry.message)) {
 			continue;
 		}
 

@@ -6,7 +6,6 @@ Personal Pi package that I use as the portable source of truth for my Pi setup a
 
 ### Local resources from this repo
 - `pi-extension/answer` — local `/answer` replacement with repo-managed config and upstream-matching UX
-- `pi-extension/diff-review` — local `/diff-review` replacement with a browser-based review UI
 - `pi-extension/notify-finished` — notifications for long-running prompts
 - `pi-extension/session-changed-files` — track files changed during a Pi session
 - `pi-extension/herdr-subagents` — persistent interactive Pi children hosted natively by Herdr
@@ -26,7 +25,7 @@ These resources are bundled locally and use the current `@earendil-works/pi-*` p
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm install
+npm install --ignore-scripts
 pi install /home/ashalom/Github/pi-agent-stuff
 ```
 
@@ -46,25 +45,30 @@ pi -e /home/ashalom/Github/pi-agent-stuff
 
 - Edit this repo, not `~/.pi/agent/extensions/`
 - Commit both `package.json` and `package-lock.json` when dependency versions change
-- On another device, clone the repo, run `npm install`, then `pi install /path/to/pi-agent-stuff`
+- On another device, clone the repo, run `npm install --ignore-scripts`, then `pi install /path/to/pi-agent-stuff`
 
 ### Adding more resources
 
-Add local extensions, skills, prompts, or themes to the corresponding repo directory and register their paths in the `pi` section of `package.json`. Then run `npm install` and `/reload`.
+Add local extensions, skills, prompts, or themes to the corresponding repo directory and register their paths in the `pi` section of `package.json`. Then run `npm install --ignore-scripts` and `/reload`.
 
 Use this repo to curate what gets loaded. Do not also install the same resource separately in Pi, or it may be loaded twice.
 
 ## Updating dependencies
 
-Pi supplies `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox` at runtime. Declare any of these that this package uses as `"*"` peer dependencies, never as runtime dependencies. Development copies belong in `devDependencies` for local tests; the Pi development dependencies here target 0.99.1.
+Pi supplies `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox` at runtime. Declare any of these that this package uses as `"*"` peer dependencies, never as runtime dependencies. Development copies belong in `devDependencies` for local tests; the Pi development dependencies here target 1.0.0.
 
-`npm update` stays within the declared version ranges. When upgrading Pi across a minor version, update the Pi development dependency ranges too, then install and test.
+`npm update` stays within the declared version ranges. When upgrading Pi across a major or minor version, update the Pi development dependency ranges too, then install and test.
 
 ```bash
 cd /home/ashalom/Github/pi-agent-stuff
-npm update
+npm update --ignore-scripts
+npm run typecheck
 npm test
 ```
+
+`npm run typecheck` strictly checks supported `pi-extension/**/*.ts` source and TypeScript config tooling under `config/`; experimental artifacts and tests are excluded. Host declaration files are skipped (`skipLibCheck`), but extension usage of their APIs is checked. `npm test` includes a real Pi extension-loader smoke test for all nine manifest entries.
+
+Pi 1.0.0's published `npm-shrinkwrap.json` pins `brace-expansion` to 5.0.9 under its development dependency tree. `npm audit` currently reports one high-severity package (three DoS advisories); the patched release is 5.0.12. A normal audit fix/update and root override do not supersede that published shrinkwrap. Await an upstream Pi release rather than force-upgrading or modifying installed host files.
 
 Then reload or reinstall the package:
 
@@ -103,20 +107,6 @@ Role definitions live in `pi-extension/herdr-subagents/agents/`; model/thinking 
 
 `/review [spec path or instructions]` reviews the uncommitted working tree along two independent axes. It discovers repository standards and requirements, asks before proceeding when either source is missing or ambiguous, prepares one shared Hunk session, and launches separate Standards and Requirements reviewer subagents. Their tagged Hunk findings are aggregated under separate headings after both finish.
 
-### `/diff-review`
-
-`/diff-review` opens a local browser review session for the current repo.
-
-Key behavior:
-- loopback-only URL on `127.0.0.1` with a per-review secret in the query string
-- session-scoped review state that is ephemeral and kept in memory
-- same-session + same-repo reuse; changing repos creates a different review session
-- working tree vs `HEAD` as the default comparison, with merge-base fallback surfaced in the UI when available mode selection falls back
-
-Frontend build workflow:
-- `npm run build:diff-review-web` — rebuild committed static assets in `pi-extension/diff-review/static/`
-- `npm run verify:diff-review-web` — rebuild into a temp directory and fail if committed static assets are stale
-
 ### `/answer` config
 
 `/answer` is implemented locally in this repo so its extraction source and model priority can be configured without editing TypeScript.
@@ -127,12 +117,15 @@ Config file:
 Default config:
 - source: `last-assistant`
 - model priority:
-  1. `github-copilot/gpt-5.4-mini`
-  2. `openai-codex/gpt-5.4-mini`
-  3. fallback to the current model
+  1. `openai-codex/gpt-6-luna`
+  2. fallback to the current model when Codex Luna is absent or unauthenticated
 - thinking level: `low`
 
-Optional override:
+GPT-6 Luna is available on OpenAI Codex starting with Pi 0.87.1 and replaces the previous GPT-5.4 mini preferences (Codex mini was removed in 0.86.0). OpenAI Codex is the only default extraction provider. No provider or authentication migration is required. Current-model fallback retains the session's model (and its pricing); set `fallbackToCurrentModel` to `false` to require a configured extraction model.
+
+Optional overrides:
+- `modelPriority`: ordered `{ "provider": "…", "model": "…" }` candidates from your available Pi catalog; the first found, authenticated model is used.
+- `fallbackToCurrentModel`: whether to use the session's current model if no candidate is usable (default `true`).
 - `thinkingLevel` in `config/answer.json` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`)
 
 ## Multiplexer support

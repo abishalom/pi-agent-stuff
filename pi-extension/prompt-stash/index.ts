@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder } from "../lib/pi-coding-agent-compat.ts";
-import { Container, matchesKey, Text, truncateToWidth, visibleWidth } from "../lib/pi-tui-compat.ts";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { Container, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const ENTRY_TYPE = "prompt-stash";
 const STATUS_KEY = "prompt-stash";
@@ -235,7 +235,16 @@ export default function promptStash(pi: ExtensionAPI) {
 		refreshStatus(ctx, stash);
 	};
 
+	// RPC can set editor text, but cannot read it: restoring would overwrite an
+	// unknown draft and remove the saved item. Reject before any stash mutation.
+	const requireTerminalEditor = (ctx: ExtensionContext): boolean => {
+		if (ctx.mode === "tui") return true;
+		ctx.ui.notify("Prompt stash editor actions require interactive mode", "error");
+		return false;
+	};
+
 	const stashCurrent = (ctx: ExtensionContext) => {
+		if (!requireTerminalEditor(ctx)) return;
 		const text = getEditorText(ctx);
 		if (isBlank(text)) {
 			ctx.ui.notify("Editor is empty", "info");
@@ -268,6 +277,7 @@ export default function promptStash(pi: ExtensionAPI) {
 	};
 
 	const popLatest = (ctx: ExtensionContext) => {
+		if (!requireTerminalEditor(ctx)) return;
 		const item = stash.at(-1);
 		if (!item) {
 			ctx.ui.notify("No saved prompts", "info");
@@ -279,6 +289,7 @@ export default function promptStash(pi: ExtensionAPI) {
 	};
 
 	const pickFromStash = async (ctx: ExtensionContext) => {
+		if (!requireTerminalEditor(ctx)) return;
 		if (stash.length === 0) {
 			ctx.ui.notify("No saved prompts", "info");
 			return;

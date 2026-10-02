@@ -289,19 +289,20 @@ export default function notifyFinished(pi: ExtensionAPI) {
 
 	pi.on("agent_start", async (_event, ctx) => {
 		const config = refreshConfig();
-		currentStartTime = Date.now();
+		// Retries, recovery, and automatic continuations share one unsettled interval.
+		currentStartTime ??= Date.now();
 		setBusyStatus(ctx, config.thresholdSeconds);
 		applyBusyTitle(ctx);
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_settled", async (_event, ctx) => {
 		const config = refreshConfig();
 		const startedAt = currentStartTime;
 		currentStartTime = null;
 		setReadyStatus(ctx, config);
 		applyReadyTitle(ctx);
 
-		if (!startedAt) return;
+		if (startedAt === null) return;
 		if (!config.enabled || config.mode === "off") return;
 
 		const elapsedMs = Date.now() - startedAt;
@@ -346,7 +347,7 @@ export default function notifyFinished(pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			persistConfig({ ...loadSavedConfig(), enabled: true });
 			setReadyStatus(ctx, refreshConfig());
-			ctx.ui.notify(summarizeConfig(activeConfig), "success");
+			ctx.ui.notify(summarizeConfig(activeConfig), "info");
 		},
 	});
 
@@ -355,7 +356,7 @@ export default function notifyFinished(pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			persistConfig({ ...loadSavedConfig(), enabled: false });
 			setReadyStatus(ctx, refreshConfig());
-			ctx.ui.notify(summarizeConfig(activeConfig), "success");
+			ctx.ui.notify(summarizeConfig(activeConfig), "info");
 		},
 	});
 
@@ -369,7 +370,7 @@ export default function notifyFinished(pi: ExtensionAPI) {
 			}
 			persistConfig({ ...loadSavedConfig(), thresholdSeconds: threshold });
 			setReadyStatus(ctx, refreshConfig());
-			ctx.ui.notify(summarizeConfig(activeConfig), "success");
+			ctx.ui.notify(summarizeConfig(activeConfig), "info");
 		},
 	});
 
@@ -388,7 +389,7 @@ export default function notifyFinished(pi: ExtensionAPI) {
 			}
 			persistConfig({ ...loadSavedConfig(), mode });
 			setReadyStatus(ctx, refreshConfig());
-			ctx.ui.notify(summarizeConfig(activeConfig), "success");
+			ctx.ui.notify(summarizeConfig(activeConfig), "info");
 		},
 	});
 }

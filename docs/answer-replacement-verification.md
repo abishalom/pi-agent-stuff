@@ -36,7 +36,7 @@ Coverage from tests:
   - explicit `low`
 - model selection behavior verified for:
   - current default priority
-  - changed priority order (Codex mini before GitHub Copilot)
+  - explicit model-priority overrides
   - fallback to current model
   - no usable model available
 - source selection behavior verified for:
@@ -85,6 +85,7 @@ Verified from the installed-package RPC response:
   - keeps the original `"No assistant messages found"` behavior if no usable assistant text exists
 - Broken `config/answer.json` does **not** disable `/answer`; invalid fields fall back to defaults and warnings are logged to stderr
 - `/answer` extraction uses `thinkingLevel: "low"` by default from `config/answer.json`
+- Current repo-managed model priority is only `openai-codex/gpt-6-luna`, with current-model fallback enabled. The dated test results above describe the original replacement verification.
 - The visible `/answer` flow is kept intentionally close to upstream; most behavior changes are isolated to helper modules
 - Additional source modes (`last-user`, `last-turn`, `whole-branch`) are implemented, but only `last-assistant` is guaranteed to match upstream behavior exactly
 

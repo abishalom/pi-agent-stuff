@@ -11,6 +11,16 @@ const hostPackages = [
 	"typebox",
 ];
 
+test("Pi development packages target the current 1.0.0 API", () => {
+	for (const name of hostPackages.filter((name) => name !== "typebox" && name !== "@earendil-works/pi-agent-core")) {
+		assert.equal(packageJson.devDependencies[name], "^1.0.0");
+	}
+	for (const field of ["dependencies", "peerDependencies", "devDependencies", "optionalDependencies"]) {
+		assert.ok(!Object.keys(packageJson[field] ?? {}).some((name) => name.startsWith("@mariozechner/")));
+	}
+	assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
+});
+
 for (const name of hostPackages) {
 	test(`${name} follows Pi's host-provided dependency contract`, () => {
 		assert.equal(packageJson.dependencies?.[name], undefined);

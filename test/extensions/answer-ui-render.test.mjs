@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QnAComponent } from "../../pi-extension/answer/ui.ts";
-import { visibleWidth } from "../../pi-extension/lib/pi-tui-compat.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 test("QnAComponent keeps rendered lines within terminal width for long question lists", () => {
 	const questions = Array.from({ length: 52 }, (_, index) => ({

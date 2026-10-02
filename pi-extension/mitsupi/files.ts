@@ -157,9 +157,16 @@ const extractFileReferencesFromContent = (content: unknown): string[] => {
 	return refs;
 };
 
-const extractFileReferencesFromEntry = (entry: SessionEntry): string[] => {
+export const extractFileReferencesFromEntry = (entry: SessionEntry): string[] => {
 	if (entry.type === "message") {
-		return extractFileReferencesFromContent(entry.message.content);
+		const refs = "content" in entry.message ? extractFileReferencesFromContent(entry.message.content) : [];
+		if (entry.message.role === "toolResult") {
+			// Metadata is bounded; consume available arguments without assuming completeness.
+			for (const call of entry.message.nestedCalls?.calls ?? []) {
+				refs.push(...extractPathsFromToolArgs(call.arguments));
+			}
+		}
+		return refs;
 	}
 
 	if (entry.type === "custom_message") {
@@ -315,7 +322,7 @@ const toCanonicalPathMaybeMissing = (
 	}
 };
 
-const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<string, SessionFileChange> => {
+export const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<string, SessionFileChange> => {
 	const toolCalls = new Map<string, { path: string; name: FileToolName }>();
 
 	for (const entry of entries) {
@@ -344,28 +351,36 @@ const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<st
 		const msg = entry.message;
 
 		if (msg.role === "toolResult") {
-			const toolCall = toolCalls.get(msg.toolCallId);
-			if (!toolCall) continue;
-
-			const resolvedPath = path.isAbsolute(toolCall.path)
-				? toolCall.path
-				: path.resolve(cwd, toolCall.path);
-			const canonical = toCanonicalPath(resolvedPath);
-			if (!canonical) {
-				continue;
+			const completedCalls: { path: string; name: FileToolName }[] = [];
+			const direct = toolCalls.get(msg.toolCallId);
+			if (direct && !msg.isError) completedCalls.push(direct);
+			// A successful child mutation still counts when its parent subsequently fails.
+			for (const call of msg.nestedCalls?.calls ?? []) {
+				if (call.status !== "ok" || (call.name !== "write" && call.name !== "edit")) continue;
+				if (typeof call.arguments?.path !== "string") continue;
+				completedCalls.push({ path: call.arguments.path, name: call.name });
 			}
-
-			const existing = fileMap.get(canonical.canonicalPath);
-			if (existing) {
-				existing.operations.add(toolCall.name);
-				if (msg.timestamp > existing.lastTimestamp) {
-					existing.lastTimestamp = msg.timestamp;
+			for (const toolCall of completedCalls) {
+				const resolvedPath = path.isAbsolute(toolCall.path)
+					? toolCall.path
+					: path.resolve(cwd, toolCall.path);
+				const canonical = toCanonicalPath(resolvedPath);
+				if (!canonical) {
+					continue;
 				}
-			} else {
-				fileMap.set(canonical.canonicalPath, {
-					operations: new Set([toolCall.name]),
-					lastTimestamp: msg.timestamp,
-				});
+
+				const existing = fileMap.get(canonical.canonicalPath);
+				if (existing) {
+					existing.operations.add(toolCall.name);
+					if (msg.timestamp > existing.lastTimestamp) {
+						existing.lastTimestamp = msg.timestamp;
+					}
+				} else {
+					fileMap.set(canonical.canonicalPath, {
+						operations: new Set([toolCall.name]),
+						lastTimestamp: msg.timestamp,
+					});
+				}
 			}
 		}
 	}
@@ -963,7 +978,7 @@ const showFileSelector = async (
 };
 
 const runFileBrowser = async (pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> => {
-	if (!ctx.hasUI) {
+	if (ctx.mode !== "tui") {
 		ctx.ui.notify("Files requires interactive mode", "error");
 		return;
 	}

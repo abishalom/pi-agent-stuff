@@ -3,7 +3,6 @@
 ## Stable package surface
 
 - `pi-extension/answer/` — local `/answer` replacement with configurable source/model selection
-- `pi-extension/diff-review/` — local browser-based diff review workflow
 - `pi-extension/herdr-subagents/` — Herdr-native persistent Pi child orchestration
   - `agents/` — adapted Explorer, Planner, Worker, and Reviewer definitions
   - `herdr.ts` — typed Herdr CLI adapter

@@ -3,10 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "../lib/pi-tui-compat.ts";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const STATUS_KEY = "session-changed-files";
 const RESET_ENTRY_TYPE = "session-changed-files-reset";
+const NESTED_OPERATION_ENTRY_TYPE = "session-changed-files-nested-operation";
+
+interface NestedOperationEntry {
+	version: 1;
+	toolCallId: string;
+	parentToolCallId: string;
+	operation: OperationSummary;
+}
 
 type FileKind = "modified" | "new" | "deleted";
 
@@ -304,14 +312,26 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 
 	const reconstructState = (ctx: ExtensionContext) => {
 		fileStats = new Map<string, FileStats>();
+		pendingWrites.clear();
+		const seenNestedCalls = new Set<string>();
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "custom" && entry.customType === RESET_ENTRY_TYPE) {
 				fileStats = new Map<string, FileStats>();
 				continue;
 			}
+			if (entry.type === "custom" && entry.customType === NESTED_OPERATION_ENTRY_TYPE) {
+				const data = entry.data as Partial<NestedOperationEntry> | undefined;
+				if (data?.version !== 1 || typeof data.toolCallId !== "string" || typeof data.parentToolCallId !== "string") continue;
+				const op = coerceOperationSummary(data.operation);
+				if (op && !seenNestedCalls.has(data.toolCallId)) {
+					seenNestedCalls.add(data.toolCallId);
+					applyOperation(fileStats, op);
+				}
+				continue;
+			}
 			if (entry.type !== "message") continue;
 			const message = entry.message;
-			if (message.role !== "toolResult") continue;
+			if (message.role !== "toolResult" || message.isError) continue;
 			if (message.toolName !== "edit" && message.toolName !== "write") continue;
 			const details = message.details as PersistedToolDetails | undefined;
 			const op = coerceOperationSummary(details?.sessionChangedFiles);
@@ -320,7 +340,18 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 		refreshUi(ctx);
 	};
 
-	const recordOperation = (ctx: ExtensionContext, operation: OperationSummary) => {
+	const recordOperation = (ctx: ExtensionContext, operation: OperationSummary, event: { toolCallId: string; parentToolCallId?: string }) => {
+		// Nested results have no transcript entries. Persist successful mutations immediately,
+		// even if the orchestrator later fails/cancels. Custom entries follow branch/reset
+		// ordering; direct calls retain their existing tool-result details only.
+		if (event.parentToolCallId !== undefined) {
+			pi.appendEntry<NestedOperationEntry>(NESTED_OPERATION_ENTRY_TYPE, {
+				version: 1,
+				toolCallId: event.toolCallId,
+				parentToolCallId: event.parentToolCallId,
+				operation,
+			});
+		}
 		applyOperation(fileStats, operation);
 		refreshUi(ctx);
 	};
@@ -340,11 +371,18 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 		}
 	});
 
+	pi.on("agent_end", async () => {
+		// Drop snapshots for blocked/abandoned calls that never emitted a result.
+		pendingWrites.clear();
+	});
+
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "write") return;
 		const input = event.input as { path?: string };
 		if (typeof input.path !== "string") return;
 		const absolutePath = toAbsolutePath(ctx.cwd, input.path);
+		// Observation happens outside Pi's file mutation queue: concurrent same-path writes
+		// can share a stale preimage. Counts are best-effort, not an atomic filesystem audit.
 		const existedBefore = fs.existsSync(absolutePath);
 		const before = existedBefore ? fs.readFileSync(absolutePath, "utf8") : "";
 		pendingWrites.set(event.toolCallId, {
@@ -368,7 +406,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 				removed: counts.removed,
 				kind: "modified",
 			};
-			recordOperation(ctx, operation);
+			recordOperation(ctx, operation, event);
 			return {
 				details: {
 					...details,
@@ -390,7 +428,7 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 				removed: counts.removed,
 				kind: snapshot.existedBefore ? "modified" : "new",
 			};
-			recordOperation(ctx, operation);
+			recordOperation(ctx, operation, event);
 			const details = (event.details ?? {}) as PersistedToolDetails;
 			return {
 				details: {
@@ -404,6 +442,10 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 	pi.registerCommand("changed-files", {
 		description: "Show files changed by write/edit tools in this session",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify("Changed-files requires interactive mode", "error");
+				return;
+			}
 			await ctx.ui.custom<void>((_tui, theme, _kb, done) => new ChangedFilesReportOverlay(theme, fileStats, done));
 		},
 	});
@@ -412,7 +454,8 @@ export default function sessionChangedFiles(pi: ExtensionAPI) {
 		description: "Reset changed-file tracking for the current session",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			fileStats = new Map<string, FileStats>();
-			pendingWrites.clear();
+			// Keep in-flight snapshots: operations completing after this marker belong
+			// to the new tracking interval (for edits and writes alike).
 			pi.appendEntry(RESET_ENTRY_TYPE, { timestamp: Date.now() });
 			refreshUi(ctx);
 			ctx.ui.notify("Changed-file tracking reset for this session", "info");

@@ -46,8 +46,7 @@ export const defaultAnswerConfigPath = join(extensionDir, "../../config/answer.j
 export const DEFAULT_ANSWER_CONFIG: AnswerConfig = {
 	source: "last-assistant",
 	modelPriority: [
-		{ provider: "github-copilot", model: "gpt-5.4-mini" },
-		{ provider: "openai-codex", model: "gpt-5.4-mini" },
+		{ provider: "openai-codex", model: "gpt-6-luna" },
 	],
 	fallbackToCurrentModel: true,
 	thinkingLevel: "low",

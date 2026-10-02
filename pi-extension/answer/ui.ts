@@ -1,5 +1,5 @@
 import type { Component, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { Editor, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../lib/pi-tui-compat.ts";
+import { Editor, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export interface ExtractedQuestion {
 	question: string;
@@ -54,9 +54,11 @@ export class QnAComponent implements Component {
 		const editorTheme: EditorTheme = {
 			borderColor: this.dim,
 			selectList: {
-				selectedBg: (s: string) => `\x1b[44m${s}\x1b[0m`,
-				matchHighlight: this.cyan,
-				itemSecondary: this.gray,
+				selectedPrefix: this.cyan,
+				selectedText: (s: string) => `\x1b[44m${s}\x1b[0m`,
+				description: this.gray,
+				scrollInfo: this.dim,
+				noMatch: this.yellow,
 			},
 		};
 

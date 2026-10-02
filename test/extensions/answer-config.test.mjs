@@ -5,8 +5,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	DEFAULT_ANSWER_CONFIG,
+	loadAnswerConfig,
 	loadAnswerConfigFromPath,
 } from "../../pi-extension/answer/config.ts";
+
+test("shipped config and defaults use only Codex Luna with current-model fallback", () => {
+	assert.deepEqual(DEFAULT_ANSWER_CONFIG.modelPriority, [
+		{ provider: "openai-codex", model: "gpt-6-luna" },
+	]);
+	assert.equal(DEFAULT_ANSWER_CONFIG.fallbackToCurrentModel, true);
+	assert.equal(DEFAULT_ANSWER_CONFIG.thinkingLevel, "low");
+	const loaded = loadAnswerConfig();
+	assert.deepEqual(loaded.config, DEFAULT_ANSWER_CONFIG);
+	assert.deepEqual(loaded.warnings, []);
+});
 
 test("loadAnswerConfigFromPath falls back to defaults for missing file", () => {
 	const missing = join(tmpdir(), `missing-answer-config-${Date.now()}.json`);
@@ -48,7 +60,7 @@ test("loadAnswerConfigFromPath skips invalid model entries but keeps valid ones"
 		JSON.stringify(
 			{
 				modelPriority: [
-					{ provider: "openai-codex", model: "gpt-5.4-mini" },
+					{ provider: "openai-codex", model: "gpt-6-luna" },
 					{ provider: "", model: "bad" },
 					"not-an-object",
 				],
@@ -59,7 +71,7 @@ test("loadAnswerConfigFromPath skips invalid model entries but keeps valid ones"
 	);
 
 	const result = loadAnswerConfigFromPath(path);
-	assert.deepEqual(result.config.modelPriority, [{ provider: "openai-codex", model: "gpt-5.4-mini" }]);
+	assert.deepEqual(result.config.modelPriority, [{ provider: "openai-codex", model: "gpt-6-luna" }]);
 	assert.equal(result.warnings.length, 2);
 });
 

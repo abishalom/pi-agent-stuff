@@ -14,71 +14,89 @@ function createRegistry({ available = {}, auth = {} } = {}) {
 	};
 }
 
-test("selectExtractionModel returns first configured authenticated model", async () => {
-	const copilot = { provider: "github-copilot", id: "gpt-5.4-mini" };
-	const codex = { provider: "openai-codex", id: "gpt-5.4-mini" };
-	const current = { provider: "openai", id: "gpt-4.1" };
+const codex = { provider: "openai-codex", id: "gpt-6-luna" };
+const current = { provider: "openai", id: "gpt-4.1" };
+const authenticated = { ok: true, apiKey: "test-key", headers: {} };
+
+test("selectExtractionModel prefers Codex Luna over the current model", async () => {
 	const registry = createRegistry({
-		available: {
-			"github-copilot/gpt-5.4-mini": copilot,
-			"openai-codex/gpt-5.4-mini": codex,
-		},
+		available: { "openai-codex/gpt-6-luna": codex },
 		auth: {
-			"github-copilot/gpt-5.4-mini": { ok: true, apiKey: "copilot-key", headers: {} },
-			"openai-codex/gpt-5.4-mini": { ok: true, apiKey: "codex-key", headers: {} },
-			"openai/gpt-4.1": { ok: true, apiKey: "current-key", headers: {} },
+			"openai-codex/gpt-6-luna": authenticated,
+			"openai/gpt-4.1": authenticated,
 		},
 	});
-
-	const selected = await selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG);
-	assert.equal(selected, copilot);
+	assert.equal(await selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG), codex);
 });
 
-test("selectExtractionModel respects config priority changes", async () => {
-	const copilot = { provider: "github-copilot", id: "gpt-5.4-mini" };
-	const codex = { provider: "openai-codex", id: "gpt-5.4-mini" };
-	const current = { provider: "openai", id: "gpt-4.1" };
+test("selectExtractionModel respects explicit priority order overrides", async () => {
 	const registry = createRegistry({
 		available: {
-			"github-copilot/gpt-5.4-mini": copilot,
-			"openai-codex/gpt-5.4-mini": codex,
+			"openai-codex/gpt-6-luna": codex,
+			"openai/gpt-4.1": current,
 		},
 		auth: {
-			"github-copilot/gpt-5.4-mini": { ok: true, apiKey: "copilot-key", headers: {} },
-			"openai-codex/gpt-5.4-mini": { ok: true, apiKey: "codex-key", headers: {} },
-			"openai/gpt-4.1": { ok: true, apiKey: "current-key", headers: {} },
+			"openai-codex/gpt-6-luna": authenticated,
+			"openai/gpt-4.1": authenticated,
 		},
 	});
+	for (const refs of [
+		[{ provider: "openai", model: "gpt-4.1" }, { provider: "openai-codex", model: "gpt-6-luna" }],
+		[{ provider: "openai-codex", model: "gpt-6-luna" }, { provider: "openai", model: "gpt-4.1" }],
+	]) {
+		assert.equal(await selectExtractionModel(current, registry, {
+			...DEFAULT_ANSWER_CONFIG,
+			modelPriority: refs,
+		}), refs[0].provider === "openai" ? current : codex);
+	}
+});
 
-	const selected = await selectExtractionModel(current, registry, {
+test("selectExtractionModel respects an explicit empty priority override", async () => {
+	const registry = createRegistry({
+		available: { "openai-codex/gpt-6-luna": codex },
+		auth: {
+			"openai-codex/gpt-6-luna": authenticated,
+			"openai/gpt-4.1": authenticated,
+		},
+	});
+	assert.equal(await selectExtractionModel(current, registry, {
 		...DEFAULT_ANSWER_CONFIG,
-		modelPriority: [{ provider: "openai-codex", model: "gpt-5.4-mini" }, { provider: "github-copilot", model: "gpt-5.4-mini" }],
-	});
-	assert.equal(selected, codex);
+		modelPriority: [],
+	}), current);
 });
 
-test("selectExtractionModel falls back to current model when configured models are unusable", async () => {
-	const current = { provider: "openai", id: "gpt-4.1" };
-	const registry = createRegistry({
-		auth: {
-			"openai/gpt-4.1": { ok: true, apiKey: "current-key", headers: {} },
-		},
+for (const present of [false, true]) {
+	test(`selectExtractionModel falls back to current when Codex Luna is ${present ? "unauthenticated" : "absent"}`, async () => {
+		const registry = createRegistry({
+			available: present ? { "openai-codex/gpt-6-luna": codex } : {},
+			auth: { "openai/gpt-4.1": authenticated },
+		});
+		assert.equal(await selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG), current);
 	});
+}
 
-	const selected = await selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG);
-	assert.equal(selected, current);
+test("selectExtractionModel looks up only Codex Luna with default config", async () => {
+	const registry = createRegistry({ auth: { "openai/gpt-4.1": authenticated } });
+	const lookups = [];
+	registry.find = (provider, model) => {
+		lookups.push(`${provider}/${model}`);
+		return null;
+	};
+	assert.equal(await selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG), current);
+	assert.deepEqual(lookups, ["openai-codex/gpt-6-luna"]);
+});
+
+test("selectExtractionModel honors disabled current-model fallback", async () => {
+	const registry = createRegistry({ auth: { "openai/gpt-4.1": authenticated } });
+	await assert.rejects(
+		() => selectExtractionModel(current, registry, { ...DEFAULT_ANSWER_CONFIG, fallbackToCurrentModel: false }),
+		/no usable extraction model found.*openai-codex\/gpt-6-luna \(not found\)/i,
+	);
 });
 
 test("selectExtractionModel throws clear error when nothing is usable", async () => {
-	const current = { provider: "openai", id: "gpt-4.1" };
-	const registry = createRegistry({
-		auth: {
-			"openai/gpt-4.1": { ok: false, error: "missing auth" },
-		},
-	});
-
 	await assert.rejects(
-		() => selectExtractionModel(current, registry, DEFAULT_ANSWER_CONFIG),
+		() => selectExtractionModel(current, createRegistry(), DEFAULT_ANSWER_CONFIG),
 		/no usable extraction model found/i,
 	);
 });

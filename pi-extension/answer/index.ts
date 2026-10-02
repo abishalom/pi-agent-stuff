@@ -1,7 +1,6 @@
 import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { completeSimple } from "../lib/pi-ai-compat.ts";
-import { BorderedLoader } from "../lib/pi-coding-agent-compat.ts";
+import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import { loadAnswerConfig } from "./config.ts";
 import { selectExtractionModel } from "./model-selection.ts";
 import { selectSourceText } from "./source-selection.ts";
@@ -65,27 +64,21 @@ async function extractQuestions(
 	loaderSignal: AbortSignal,
 	reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
 ): Promise<ExtractionResult | null> {
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(extractionModel);
-	if (!auth.ok) {
-		throw new Error(auth.error);
-	}
-
 	const userMessage: UserMessage = {
 		role: "user",
 		content: [{ type: "text", text: sourceText }],
 		timestamp: Date.now(),
 	};
 
-	const response = await completeSimple(
+	// Let Pi resolve request-time auth, provider configuration, and virtual-model routes.
+	const response = await ctx.modelRegistry.streamSimple(
 		extractionModel,
 		{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
 		{
-			apiKey: auth.apiKey,
-			headers: auth.headers,
 			signal: loaderSignal,
 			reasoning: reasoningLevel && reasoningLevel !== "off" ? reasoningLevel : undefined,
 		},
-	);
+	).result();
 
 	if (response.stopReason === "aborted") {
 		return null;
@@ -101,7 +94,7 @@ async function extractQuestions(
 
 export default function answerExtension(pi: ExtensionAPI) {
 	const answerHandler = async (ctx: ExtensionContext) => {
-		if (!ctx.hasUI) {
+		if (ctx.mode !== "tui") {
 			ctx.ui.notify("answer requires interactive mode", "error");
 			return;
 		}
@@ -146,7 +139,7 @@ export default function answerExtension(pi: ExtensionAPI) {
 			return loader;
 		});
 
-		if (extractionResult === null) {
+		if (extractionResult == null) {
 			ctx.ui.notify("Cancelled", "info");
 			return;
 		}
@@ -160,7 +153,7 @@ export default function answerExtension(pi: ExtensionAPI) {
 			return new QnAComponent(extractionResult.questions, tui, done);
 		});
 
-		if (answersResult === null) {
+		if (answersResult == null) {
 			ctx.ui.notify("Cancelled", "info");
 			return;
 		}

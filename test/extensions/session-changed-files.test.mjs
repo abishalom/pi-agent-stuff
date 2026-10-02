@@ -44,6 +44,7 @@ function createContext(cwd) {
 	const ctx = {
 		cwd,
 		hasUI: true,
+		mode: "tui",
 		sessionManager: {
 			getBranch() {
 				return [];
