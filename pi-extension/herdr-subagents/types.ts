@@ -55,6 +55,8 @@ export interface PaneInfo {
   interactiveReady?: boolean;
   sessionPath?: string;
   agent?: string;
+  focused?: boolean;
+  tokens?: Record<string, string>;
 }
 
 export interface SurfaceInfo {
@@ -128,7 +130,10 @@ export interface HerdrClient {
   }, signal?: AbortSignal): Promise<SurfaceInfo>;
   renamePane(paneId: string, label: string, signal?: AbortSignal): Promise<void>;
   renameTab(tabId: string, label: string, signal?: AbortSignal): Promise<void>;
-  reportRole(paneId: string, role: string, signal?: AbortSignal): Promise<void>;
+  reportRole(paneId: string, role: string, owner: { sessionId: string; paneId: string }, signal?: AbortSignal): Promise<void>;
+  reportActivity(paneId: string, activity: "ready" | "compacting", signal?: AbortSignal): Promise<void>;
+  listPanes(workspaceId: string, signal?: AbortSignal): Promise<PaneInfo[]>;
+  closePane(paneId: string, signal?: AbortSignal): Promise<void>;
   startPi(input: {
     paneId: string;
     controlName: string;

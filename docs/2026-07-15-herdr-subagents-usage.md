@@ -53,9 +53,23 @@ The resolved model/thinking policy comes from `config/subagent-model-overrides.j
 - `get_subagent_result`: retrieve the latest completed response once without waiting. The default model-visible limit is 16 KiB and callers may request up to 50 KiB.
 - `subagents_list`: show resolved role definitions and discovery diagnostics.
 
-Control tools accept only pane IDs launched by the current parent runtime. They reject unrelated panes and children surviving an earlier `/reload`, session replacement, or parent process.
+Control tools accept only pane IDs launched by the current parent runtime. They reject unrelated panes and children surviving an earlier `/reload`, session replacement, or parent process. Cleanup is the separate metadata-based exception described below.
 
 A blocked child may be displaying a selector or permission prompt. Follow-ups are queued, and interrupts require direct pane interaction rather than blindly injecting text or Escape.
+
+## Cleaning up finished children
+
+Run `/cleanup-subagents` with no arguments. This is a native extension command, not a prompt template: it makes no model request, sends no prompts or Escape, and never forces closure. It reports closed panes, skips (with reasons), and failures independently; one pane failure does not stop other eligible closures.
+
+Only after the initial task is successfully submitted and the child is tracked, each extension-launched child is tagged through `herdr pane report-metadata` under source `pi-herdr-subagents`, scoped to lifecycle source `herdr:pi`, with `role`, `pi_parent_session` (launching Pi session ID), and `pi_parent_pane` (direct parent pane ID) tokens. Metadata failure warns and leaves that child ineligible for cleanup. Existing role-only/untagged panes are **not adopted**.
+
+Cleanup queries the calling pane's current Herdr workspace, then considers only tagged **direct** Pi children of the current session and parent pane. It excludes the parent, focused panes (or unknown focus), other workspaces/sessions/parents, shells, and working/blocked/unknown agents. Only `idle` and `done` with a positive `pi_cleanup_state=ready` activity marker are eligible. Queued follow-ups and in-flight runtime mutations are skipped; runtime submissions/draining cannot race an acquired cleanup lock. This guard excludes cleanup versus mutations only: concurrent follow-ups and automatic FIFO draining are not mutually excluded. Caller/session validity and live pane identity, ownership, focus, workspace and status are rechecked before each `herdr pane close <pane-id>`.
+
+Unlike control tools, cleanup works after `/reload` or resuming the **same** Pi session in the **same** parent pane, using Herdr metadata rather than rebuilding runtime controls or monitors. A new/forked session or another parent pane does not inherit ownership. Grandchildren belong to their immediate parent. If inherited caller context no longer matches the live parent pane, cleanup refuses to proceed.
+
+Children publish `pi_cleanup_state` under source `pi-herdr-subagents-activity`, scoped to `herdr:pi`: `ready` on session start and terminal compaction success/failure/abort, `compacting` from the awaited `session_before_compact` hook. That hook covers manual and automatic compaction; if publication fails, it cancels compaction rather than allowing invisible summary work. Parent-requested compaction publishes `compacting` **before** submission, bridging the gap until the child's hook runs. This live marker survives parent reload and remains ineligible even when Herdr reports idle. Older children without activity hooks are skipped. There is no TTL or durable registry: ambiguous submission failures, missed terminal hooks, or metadata errors can conservatively leave a stale `compacting` marker; inspect and manage that pane directly rather than force cleanup.
+
+Herdr 0.9.3's bundled API schema exposes `tokens` as a string-valued map in pane records and `report-metadata` accepts repeatable `--token NAME=VALUE` flags. Ownership uses no TTL; availability depends on Herdr retaining/exposing that source's live metadata. It is not a security boundary or a durable registry across Herdr restarts. A pane manually repurposed with misleading/stale metadata must be handled directly. Herdr's close API has no conditional ownership/status revision argument, so a small check-to-close race with external interaction remains, including manual compaction starting before its hook's marker reaches Herdr. The marker protects observed compaction, not an atomic close precondition. No interruption, retry, or force is used to overcome these limitations.
 
 ## Context management
 
@@ -79,7 +93,7 @@ Use `get_subagent_result` only when the compact handoff omitted needed detail. R
 - Child tool allowlists reduce accidental mutation but are not a security sandbox, especially when `bash` is available.
 - Each runtime owns only its direct children; grandchild handoffs go to their immediate parent, not the root. Control tools cannot address descendants owned by another runtime.
 - `/reload`, `/new`, `/resume`, `/fork`, and parent exit stop monitoring but leave child panes and Pi processes running for direct use.
-- V1 does not reconnect surviving children, create worktrees, retry failed models, or auto-close surfaces.
+- V1 does not reconnect surviving children, create worktrees, retry failed models, or auto-close surfaces. Explicit `/cleanup-subagents` can close metadata-linked settled children without reconnecting them.
 
 ## Manual Herdr fallback
 

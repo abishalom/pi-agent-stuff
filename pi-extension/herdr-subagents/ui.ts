@@ -23,6 +23,27 @@ export interface SubagentController {
   status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus>;
 }
 
+export function registerCleanupCommand(pi: ExtensionAPI, controller: {
+  cleanup(ctx: ExtensionContext): Promise<{ closed: string[]; skipped: string[]; failed: string[] }>;
+}): void {
+  pi.registerCommand("cleanup-subagents", {
+    description: "Close idle/done direct Herdr children owned by this Pi session (no model call)",
+    handler: async (args, ctx) => {
+      if (args.trim()) { ctx.ui.notify("Usage: /cleanup-subagents (no arguments)", "warning"); return; }
+      try {
+        const result = await controller.cleanup(ctx);
+        ctx.ui.notify([
+          `Closed (${result.closed.length}): ${result.closed.join(", ") || "none"}`,
+          `Skipped (${result.skipped.length}): ${result.skipped.join("; ") || "none"}`,
+          `Failed (${result.failed.length}): ${result.failed.join("; ") || "none"}`,
+        ].join("\n"), result.failed.length ? "warning" : "info");
+      } catch (error) {
+        ctx.ui.notify(`Subagent cleanup failed: ${String(error)}`, "error");
+      }
+    },
+  });
+}
+
 export interface ParsedSubagentCommand {
   agent: string;
   task: string;

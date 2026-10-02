@@ -18,11 +18,12 @@ import { COMPACTION_CUSTOM_TYPE, type ChildCompactionOutcome, CONTEXT_CUSTOM_TYP
 import type {
   AgentCatalog,
   HerdrClient,
+  PaneInfo,
   Placement,
   ThinkingLevel,
   TrackedSubagent,
 } from "./types.ts";
-import { registerSubagentsUI, type LaunchInput, type SubagentController } from "./ui.ts";
+import { registerCleanupCommand, registerSubagentsUI, type LaunchInput, type SubagentController } from "./ui.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const ORCHESTRATION_TOOLS = ["subagent", "subagent_followup", "subagent_interrupt", "subagent_compact", "subagent_status", "get_subagent_result", "subagents_list"];
@@ -82,6 +83,8 @@ export class HerdrSubagentsRuntime implements SubagentController {
   private validation?: Promise<void>;
   private generation = 1;
   private closed = false;
+  private sessionId?: string;
+  private cleaning = false;
 
   constructor(pi: ExtensionAPI, options: HerdrSubagentsOptions = {}) {
     this.pi = pi;
@@ -96,6 +99,7 @@ export class HerdrSubagentsRuntime implements SubagentController {
 
   startSession(ctx: ExtensionContext): void {
     this.closed = false;
+    this.sessionId = ctx.sessionManager.getSessionId();
     this.delivery.setContext(ctx);
     this.catalog = loadAgentCatalog({
       cwd: ctx.cwd,
@@ -158,6 +162,7 @@ export class HerdrSubagentsRuntime implements SubagentController {
 
   async launch(input: LaunchInput, ctx: ExtensionContext): Promise<TrackedSubagent> {
     if (this.closed) throw new Error("This parent subagent runtime has shut down");
+    const ownerSessionId = ctx.sessionManager.getSessionId();
     this.delivery.setContext(ctx);
     if (!Number.isInteger(this.depth) || this.depth < 0 || this.depth >= MAX_DEPTH) {
       throw new Error(`Subagent depth limit reached (maximum ${MAX_DEPTH})`);
@@ -227,12 +232,6 @@ export class HerdrSubagentsRuntime implements SubagentController {
       }
       await this.client.renamePane(surface.paneId, label, signal);
       if (placement === "tab") await this.client.renameTab(surface.tabId, label, signal);
-      try {
-        await this.client.reportRole(surface.paneId, definition.name, signal);
-      } catch (error) {
-        ctx.ui.notify(`Subagent started without Herdr role metadata: ${String(error)}`, "warning");
-      }
-
       promptDir = await mkdtemp(join(tmpdir(), "pi-herdr-subagent-"));
       await chmod(promptDir, 0o700);
       const promptPath = join(promptDir, "role.md");
@@ -275,7 +274,16 @@ export class HerdrSubagentsRuntime implements SubagentController {
         monitorAbort: new AbortController(),
         generation: this.generation,
       };
+      if (this.closed || this.sessionId !== ownerSessionId || ctx.sessionManager.getSessionId() !== ownerSessionId) {
+        throw new Error("Parent session changed during child launch; refusing to attach ownership");
+      }
       this.monitor.track(child);
+      // Unsubmitted/untracked surfaces must never be eligible for cleanup.
+      try {
+        await this.client.reportRole(surface.paneId, definition.name, { sessionId: ownerSessionId, paneId: parentPaneId }, signal);
+      } catch (error) {
+        ctx.ui.notify(`Subagent started without Herdr ownership metadata (cleanup will skip it): ${String(error)}`, "warning");
+      }
       return child;
     } catch (error) {
       const location = surface ? ` Child surface remains open at ${surface.paneId}.` : "";
@@ -283,6 +291,69 @@ export class HerdrSubagentsRuntime implements SubagentController {
     } finally {
       this.reservedLabels.delete(label);
       if (promptDir) await rm(promptDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async cleanup(ctx: ExtensionContext): Promise<{ closed: string[]; skipped: string[]; failed: string[] }> {
+    if (this.cleaning) throw new Error("Subagent cleanup is already running");
+    if (ctx.mode !== "tui" || this.env.HERDR_ENV !== "1" || !this.env.HERDR_PANE_ID) {
+      throw new Error("Subagent cleanup requires Pi's TUI inside a Herdr pane");
+    }
+    const sessionId = ctx.sessionManager.getSessionId();
+    const generation = this.generation;
+    const assertSession = () => {
+      if (this.closed || generation !== this.generation || this.sessionId !== sessionId || ctx.sessionManager.getSessionId() !== sessionId) {
+        throw new Error("Parent session changed during cleanup");
+      }
+    };
+    const result = { closed: [] as string[], skipped: [] as string[], failed: [] as string[] };
+    const signal = this.runtimeAbort.signal;
+    this.cleaning = true;
+    try {
+      assertSession();
+      // Do not reuse launch's cached caller/workspace: panes can move.
+      const parent = await this.client.currentPane(signal);
+      assertSession();
+      if (parent.paneId !== this.env.HERDR_PANE_ID) {
+        throw new Error(`Herdr parent pane mismatch: environment=${this.env.HERDR_PANE_ID}, current=${parent.paneId}`);
+      }
+      const panes = await this.client.listPanes(parent.workspaceId, signal);
+      const reason = (pane: PaneInfo): string | undefined => {
+        if (pane.paneId === parent.paneId) return "parent pane";
+        if (pane.workspaceId !== parent.workspaceId) return "different workspace";
+        if (pane.focused !== false) return "focused or focus unknown";
+        if (pane.agent !== "pi" || !pane.tokens?.role || pane.tokens.pi_parent_session !== sessionId || pane.tokens.pi_parent_pane !== parent.paneId) return "not a tagged direct child of this session";
+        if (pane.tokens.pi_cleanup_state !== "ready") return "compacting or activity unknown";
+        if (pane.status !== "idle" && pane.status !== "done") return `status ${pane.status}`;
+        if (this.monitor.getOwned(pane.paneId)?.queuedFollowups.length) return "queued follow-ups";
+        return undefined;
+      };
+      for (const pane of panes) {
+        let skip = reason(pane);
+        if (skip) { result.skipped.push(`${pane.paneId}: ${skip}`); continue; }
+        if (!this.monitor.lockForCleanup(pane.paneId)) {
+          result.skipped.push(`${pane.paneId}: queued follow-ups or operation in progress`);
+          continue;
+        }
+        try {
+          assertSession();
+          const caller = await this.client.currentPane(signal);
+          if (caller.paneId !== parent.paneId || caller.workspaceId !== parent.workspaceId) throw new Error("Parent pane/workspace changed during cleanup");
+          const live = await this.client.getPane(pane.paneId, signal);
+          assertSession();
+          skip = !live ? "pane no longer exists" : live.paneId !== pane.paneId ? "pane identity changed" : reason(live);
+          if (skip) { result.skipped.push(`${pane.paneId}: ${skip}`); continue; }
+          await this.client.closePane(pane.paneId, signal);
+          result.closed.push(pane.paneId);
+        } catch (error) {
+          result.failed.push(`${pane.paneId}: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          this.monitor.releaseCleanup(pane.paneId);
+        }
+      }
+      return result;
+    } finally {
+      this.cleaning = false;
     }
   }
 
@@ -304,6 +375,16 @@ export class HerdrSubagentsRuntime implements SubagentController {
 
   status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus> {
     return this.monitor.status(paneId, signal ? AbortSignal.any([signal, this.runtimeAbort.signal]) : this.runtimeAbort.signal);
+  }
+
+  async reportActivity(activity: "ready" | "compacting", ctx: ExtensionContext): Promise<void> {
+    if (ctx.mode !== "tui" || this.env.HERDR_ENV !== "1" || !this.env.HERDR_PANE_ID) return;
+    const sessionId = ctx.sessionManager.getSessionId();
+    const pane = await this.client.currentPane();
+    if (this.closed || this.sessionId !== sessionId || ctx.sessionManager.getSessionId() !== sessionId || pane.paneId !== this.env.HERDR_PANE_ID) {
+      throw new Error("Child session/caller changed while reporting cleanup activity");
+    }
+    await this.client.reportActivity(pane.paneId, activity);
   }
 
   parentSettled(ctx: ExtensionContext): void {
@@ -331,6 +412,17 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
     const runtime = new HerdrSubagentsRuntime(pi, options);
     pi.registerMessageRenderer(DELIVERY_CUSTOM_TYPE, renderDeliveryMessage);
     if (canDelegate) registerSubagentsUI(pi, runtime);
+    registerCleanupCommand(pi, runtime);
+    const reportActivity = async (activity: "ready" | "compacting", ctx: ExtensionContext) => {
+      if (!child) return true;
+      try {
+        await runtime.reportActivity(activity, ctx);
+        return true;
+      } catch (error) {
+        ctx.ui.notify(`Could not report child cleanup activity: ${String(error)}`, "warning");
+        return false;
+      }
+    };
     const reportContext = (ctx: ExtensionContext, reason: ChildContextSnapshot["reason"]) => {
       if (!child) return;
       const usage = ctx.getContextUsage();
@@ -343,11 +435,16 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
         model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
       });
     };
-    pi.on("session_start", (_event, ctx) => {
+    pi.on("session_start", async (_event, ctx) => {
       runtime.startSession(ctx);
       reportContext(ctx, "session_start");
+      await reportActivity("ready", ctx);
     });
-    pi.on("session_compact", (event, ctx) => {
+    pi.on("session_before_compact", async (_event, ctx) => {
+      // Await publication before Pi begins summary generation; fail closed.
+      if (!await reportActivity("compacting", ctx)) return { cancel: true };
+    });
+    pi.on("session_compact", async (event, ctx) => {
       if (child) pi.appendEntry<ChildCompactionOutcome>(COMPACTION_CUSTOM_TYPE, {
         timestamp: new Date().toISOString(),
         outcome: "success",
@@ -356,8 +453,9 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
         fromExtension: event.fromExtension,
       });
       reportContext(ctx, "session_compact");
+      await reportActivity("ready", ctx);
     });
-    pi.on("session_compact_failed", (event) => {
+    pi.on("session_compact_failed", async (event, ctx) => {
       if (child) pi.appendEntry<ChildCompactionOutcome>(COMPACTION_CUSTOM_TYPE, {
         timestamp: new Date().toISOString(),
         outcome: event.aborted ? "aborted" : "failure",
@@ -366,6 +464,7 @@ export function createHerdrSubagentsExtension(options: HerdrSubagentsOptions = {
         fromExtension: event.fromExtension,
         errorMessage: event.errorMessage,
       });
+      await reportActivity("ready", ctx);
     });
     pi.on("model_select", (_event, ctx) => reportContext(ctx, "model_select"));
     pi.on("session_tree", (_event, ctx) => reportContext(ctx, "session_tree"));

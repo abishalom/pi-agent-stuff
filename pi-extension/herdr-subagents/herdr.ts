@@ -82,6 +82,8 @@ export function parsePaneInfo(value: unknown): PaneInfo {
     interactiveReady: typeof pane.interactive_ready === "boolean" ? pane.interactive_ready : undefined,
     sessionPath: text(session?.value),
     agent: text(pane.agent),
+    focused: typeof pane.focused === "boolean" ? pane.focused : undefined,
+    tokens: Object.fromEntries(Object.entries(record(pane.tokens) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === "string")),
   };
 }
 
@@ -235,12 +237,33 @@ export class CliHerdrClient implements HerdrClient {
     await this.run(["tab", "rename", tabId, label], { signal, timeout: 5000 });
   }
 
-  async reportRole(paneId: string, role: string, signal?: AbortSignal): Promise<void> {
+  async listPanes(workspaceId: string, signal?: AbortSignal): Promise<PaneInfo[]> {
+    const result = this.result(await this.run(["pane", "list", "--workspace", workspaceId], { signal, timeout: 5000 }));
+    if (!Array.isArray(result.panes)) throw new Error("Herdr response is missing panes");
+    return result.panes.map(parsePaneInfo);
+  }
+
+  async closePane(paneId: string, signal?: AbortSignal): Promise<void> {
+    await this.run(["pane", "close", paneId], { signal, timeout: 5000 });
+  }
+
+  async reportRole(paneId: string, role: string, owner: { sessionId: string; paneId: string }, signal?: AbortSignal): Promise<void> {
     await this.run([
       "pane", "report-metadata", paneId,
       "--source", SOURCE_ID,
       "--applies-to-source", "herdr:pi",
       "--token", `role=${role}`,
+      "--token", `pi_parent_session=${owner.sessionId}`,
+      "--token", `pi_parent_pane=${owner.paneId}`,
+    ], { signal, timeout: 5000 });
+  }
+
+  async reportActivity(paneId: string, activity: "ready" | "compacting", signal?: AbortSignal): Promise<void> {
+    await this.run([
+      "pane", "report-metadata", paneId,
+      "--source", `${SOURCE_ID}-activity`,
+      "--applies-to-source", "herdr:pi",
+      "--token", `pi_cleanup_state=${activity}`,
     ], { signal, timeout: 5000 });
   }
 

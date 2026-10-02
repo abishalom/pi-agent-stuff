@@ -852,6 +852,7 @@ class LifecycleHerdrClient {
 		}
 		return this.info();
 	}
+	async reportActivity() {}
 	async sendEscape() { this.escapes += 1; }
 }
 
@@ -1142,6 +1143,7 @@ class FakeHerdrClient {
 	async renamePane(...args) { this.calls.push(["renamePane", ...args]); }
 	async renameTab(...args) { this.calls.push(["renameTab", ...args]); }
 	async reportRole(...args) { this.calls.push(["reportRole", ...args]); }
+	async reportActivity(...args) { this.calls.push(["reportActivity", ...args]); }
 	async startPi(input) { this.calls.push(["startPi", input]); return { paneId: input.paneId, tabId: input.paneId === "w1:p2" ? "w1:t2" : "w1:t1", workspaceId: "w1", status: "idle", sessionPath: this.sessionPath, interactiveReady: true }; }
 	async prompt(paneId, message) { this.calls.push(["prompt", paneId, message]); this.status = "working"; return { paneId, tabId: "w1:t2", workspaceId: "w1", status: "working", sessionPath: this.sessionPath, stateChangeSeq: 7 }; }
 	async getAgent(paneId) { return { paneId, tabId: "w1:t2", workspaceId: "w1", status: this.status, sessionPath: this.sessionPath, stateChangeSeq: 7 }; }
@@ -1155,6 +1157,7 @@ class FakeHerdrClient {
 function fakePi() {
 	return {
 		sent: [],
+		registerCommand() {},
 		getThinkingLevel: () => "low",
 		getAllTools: () => BUILTIN_TOOLS.map((name) => ({ name })),
 		sendMessage(message, options) { this.sent.push({ message, options }); },
@@ -1165,6 +1168,7 @@ function fakeContext() {
 	const model = { provider: "openai-codex", id: "gpt-6-luna", reasoning: true };
 	return {
 		mode: "tui",
+		sessionManager: { getSessionId: () => "parent-session" },
 		cwd: ROOT,
 		isProjectTrusted: () => false,
 		isIdle: () => true,
@@ -1199,6 +1203,9 @@ test("runtime launches a default tab, waits for prompt submission, cleans prompt
 	assert.deepEqual(client.calls.find(([name]) => name === "createTab")[1].env,
 		{ PI_HERDR_SUBAGENT: "1", PI_HERDR_AGENT: "explorer", PI_HERDR_DEPTH: "1", PI_HERDR_DELEGATES: "0" });
 	assert.ok(client.calls.some(([name]) => name === "createTab"));
+	const metadata = client.calls.find(([name]) => name === "reportRole");
+	assert.deepEqual(metadata.slice(1, 4), ["w1:p2", "explorer", { sessionId: "parent-session", paneId: "w1:p1" }]);
+	assert.ok(client.calls.findIndex(([name]) => name === "prompt") < client.calls.findIndex(([name]) => name === "reportRole"));
 	assert.ok(client.calls.some(([name, , message]) => name === "prompt" && message === "Find auth entry points"));
 	const start = client.calls.find(([name]) => name === "startPi")[1];
 	assert.ok(start.args.includes("--append-system-prompt"));
@@ -1370,6 +1377,8 @@ test("child sessions initialize delivery but register orchestration only when de
 		assert.equal(registered.includes("subagent"), expected);
 		assert.equal(registered.includes("subagent_compact"), expected);
 		assert.equal(registered.includes("subagent_status"), expected);
+		assert.ok(registered.includes("cleanup-subagents"));
+		assert.ok(registered.includes("session_before_compact"));
 		assert.ok(registered.includes("session_compact"));
 		assert.ok(registered.includes("session_compact_failed"));
 		assert.ok(registered.includes("session_start"));

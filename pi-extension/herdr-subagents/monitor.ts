@@ -29,6 +29,31 @@ export class SubagentMonitorManager {
   private readonly children = new Map<string, TrackedSubagent>();
   private readonly monitorErrors = new Map<string, string>();
   private closed = false;
+  private readonly cleanupLocks = new Set<string>();
+  private readonly mutations = new Map<string, number>();
+
+  lockForCleanup(paneId: string): boolean {
+    if (this.cleanupLocks.has(paneId) || this.mutations.has(paneId) || this.children.get(paneId)?.queuedFollowups.length) return false;
+    this.cleanupLocks.add(paneId);
+    return true;
+  }
+
+  releaseCleanup(paneId: string): void {
+    this.cleanupLocks.delete(paneId);
+  }
+
+  // Mutations may overlap each other as before; only cleanup is exclusive.
+  private async mutate<T>(paneId: string, operation: () => Promise<T>): Promise<T> {
+    if (this.cleanupLocks.has(paneId)) throw new Error(`Child ${paneId} is being cleaned up`);
+    this.mutations.set(paneId, (this.mutations.get(paneId) ?? 0) + 1);
+    try {
+      return await operation();
+    } finally {
+      const remaining = this.mutations.get(paneId)! - 1;
+      if (remaining) this.mutations.set(paneId, remaining);
+      else this.mutations.delete(paneId);
+    }
+  }
 
   constructor(client: HerdrClient, delivery: DeliveryScheduler, readers = new SessionReaderStore()) {
     this.client = client;
@@ -216,81 +241,90 @@ export class SubagentMonitorManager {
   }
 
   private async drainOneFollowup(child: TrackedSubagent, settlementSeq?: number): Promise<void> {
-    if (!child.queuedFollowups.length || child.status !== "settled") return;
-    const current = await this.client.getAgent(child.paneId, child.monitorAbort.signal);
-    if (!current || !isSettled(current.status)) return;
-    child.lastDrainedSettlementSeq = current.stateChangeSeq ?? settlementSeq;
-    const message = child.queuedFollowups.shift()!;
-    try {
-      const prompted = await this.client.prompt(child.paneId, message, child.monitorAbort.signal);
-      child.status = prompted.status === "blocked" ? "blocked" : isSettled(prompted.status) ? "settled" : "working";
-      child.turnStartedAt = Date.now();
-      child.stateChangeSeq = prompted.stateChangeSeq;
-      child.fastSettledFollowupPending = isSettled(prompted.status) && child.queuedFollowups.length > 0;
-    } catch (error) {
-      child.queuedFollowups.unshift(message);
-      this.delivery.enqueue(this.event(child, "failure", { errorMessage: `Could not submit queued follow-up: ${String(error)}` }));
-    }
+    if (!child.queuedFollowups.length || child.status !== "settled" || this.cleanupLocks.has(child.paneId)) return;
+    return this.mutate(child.paneId, async () => {
+      const current = await this.client.getAgent(child.paneId, child.monitorAbort.signal);
+      if (!current || !isSettled(current.status)) return;
+      child.lastDrainedSettlementSeq = current.stateChangeSeq ?? settlementSeq;
+      const message = child.queuedFollowups.shift()!;
+      try {
+        const prompted = await this.client.prompt(child.paneId, message, child.monitorAbort.signal);
+        child.status = prompted.status === "blocked" ? "blocked" : isSettled(prompted.status) ? "settled" : "working";
+        child.turnStartedAt = Date.now();
+        child.stateChangeSeq = prompted.stateChangeSeq;
+        child.fastSettledFollowupPending = isSettled(prompted.status) && child.queuedFollowups.length > 0;
+      } catch (error) {
+        child.queuedFollowups.unshift(message);
+        this.delivery.enqueue(this.event(child, "failure", { errorMessage: `Could not submit queued follow-up: ${String(error)}` }));
+      }
+    });
   }
 
   async followup(paneId: string, message: string): Promise<{ queued: boolean; blocked: boolean; status: string }> {
     const child = this.requireOwned(paneId);
-    if (!message.trim()) throw new Error("Follow-up message must not be empty");
-    if (child.status === "exited") throw new Error(`Child ${paneId} has exited`);
-    const current = await this.client.getAgent(paneId);
-    if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
-    if (current.status === "working") {
-      child.status = "working";
-      child.queuedFollowups.push(message);
-      return { queued: true, blocked: false, status: "queued behind active turn" };
-    }
-    if (current.status === "blocked") {
-      child.status = "blocked";
-      child.queuedFollowups.push(message);
-      return { queued: true, blocked: true, status: "queued; direct pane interaction may be required" };
-    }
-    if (!isSettled(current.status)) {
-      child.queuedFollowups.push(message);
-      return { queued: true, blocked: false, status: `queued while child status is ${current.status}` };
-    }
-    if (child.queuedFollowups.length) {
-      child.queuedFollowups.push(message);
-      await this.drainOneFollowup(child, current.stateChangeSeq);
-      return { queued: true, blocked: false, status: "queued behind earlier follow-ups" };
-    }
-    try {
-      const prompted = await this.client.prompt(paneId, message);
-      child.status = prompted.status === "blocked" ? "blocked" : isSettled(prompted.status) ? "settled" : "working";
-      child.turnStartedAt = Date.now();
-      child.stateChangeSeq = prompted.stateChangeSeq;
-      return { queued: false, blocked: child.status === "blocked", status: "submitted" };
-    } catch (error) {
-      const raced = await this.client.getAgent(paneId);
-      if (raced?.status === "working" || raced?.status === "blocked") {
-        child.status = raced.status;
+    return this.mutate(paneId, async () => {
+      if (!message.trim()) throw new Error("Follow-up message must not be empty");
+      if (child.status === "exited") throw new Error(`Child ${paneId} has exited`);
+      const current = await this.client.getAgent(paneId);
+      if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
+      if (current.status === "working") {
+        child.status = "working";
         child.queuedFollowups.push(message);
-        return {
-          queued: true,
-          blocked: raced.status === "blocked",
-          status: raced.status === "blocked" ? "queued; direct pane interaction may be required" : "queued behind a direct child turn",
-        };
+        return { queued: true, blocked: false, status: "queued behind active turn" };
       }
-      throw error;
-    }
+      if (current.status === "blocked") {
+        child.status = "blocked";
+        child.queuedFollowups.push(message);
+        return { queued: true, blocked: true, status: "queued; direct pane interaction may be required" };
+      }
+      if (!isSettled(current.status)) {
+        child.queuedFollowups.push(message);
+        return { queued: true, blocked: false, status: `queued while child status is ${current.status}` };
+      }
+      if (child.queuedFollowups.length) {
+        child.queuedFollowups.push(message);
+        await this.drainOneFollowup(child, current.stateChangeSeq);
+        return { queued: true, blocked: false, status: "queued behind earlier follow-ups" };
+      }
+      try {
+        const prompted = await this.client.prompt(paneId, message);
+        child.status = prompted.status === "blocked" ? "blocked" : isSettled(prompted.status) ? "settled" : "working";
+        child.turnStartedAt = Date.now();
+        child.stateChangeSeq = prompted.stateChangeSeq;
+        return { queued: false, blocked: child.status === "blocked", status: "submitted" };
+      } catch (error) {
+        const raced = await this.client.getAgent(paneId);
+        if (raced?.status === "working" || raced?.status === "blocked") {
+          child.status = raced.status;
+          child.queuedFollowups.push(message);
+          return {
+            queued: true,
+            blocked: raced.status === "blocked",
+            status: raced.status === "blocked" ? "queued; direct pane interaction may be required" : "queued behind a direct child turn",
+          };
+        }
+        throw error;
+      }
+    });
   }
 
   async compact(paneId: string, instructions?: string, signal?: AbortSignal): Promise<CompactionRequest> {
     const child = this.requireOwned(paneId);
-    if (this.closed || child.status === "exited") throw new Error(`Child ${paneId} has exited`);
-    const operationSignal = signal ? AbortSignal.any([signal, child.monitorAbort.signal]) : child.monitorAbort.signal;
-    operationSignal.throwIfAborted();
-    const current = await this.client.getAgent(paneId, operationSignal);
-    if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
-    if (!isSettled(current.status)) throw new Error(`Cannot compact child ${paneId} while status is ${current.status}; requires idle/settled`);
-    if (child.queuedFollowups.length) throw new Error(`Cannot compact child ${paneId} with queued follow-ups`);
-    operationSignal.throwIfAborted();
-    await this.client.requestCompaction(paneId, instructions, operationSignal);
-    return { paneId, requested: true };
+    return this.mutate(paneId, async () => {
+      if (this.closed || child.status === "exited") throw new Error(`Child ${paneId} has exited`);
+      const operationSignal = signal ? AbortSignal.any([signal, child.monitorAbort.signal]) : child.monitorAbort.signal;
+      operationSignal.throwIfAborted();
+      const current = await this.client.getAgent(paneId, operationSignal);
+      if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
+      if (!isSettled(current.status)) throw new Error(`Cannot compact child ${paneId} while status is ${current.status}; requires idle/settled`);
+      if (child.queuedFollowups.length) throw new Error(`Cannot compact child ${paneId} with queued follow-ups`);
+      operationSignal.throwIfAborted();
+      // Retained live metadata bridges submission, child hook startup and parent reload.
+      // On an ambiguous submission failure, leave compacting until a terminal child hook.
+      await this.client.reportActivity(paneId, "compacting", operationSignal);
+      await this.client.requestCompaction(paneId, instructions, operationSignal);
+      return { paneId, requested: true };
+    });
   }
 
   async status(paneId: string, signal?: AbortSignal): Promise<SubagentStatus> {
@@ -306,24 +340,26 @@ export class SubagentMonitorManager {
 
   async interrupt(paneId: string): Promise<{ interrupted: boolean; status: string }> {
     const child = this.requireOwned(paneId);
-    const current = await this.client.getAgent(paneId);
-    if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
-    if (isSettled(current.status)) return { interrupted: false, status: "already settled" };
-    if (current.status === "blocked") return { interrupted: false, status: "blocked; interact with the child pane directly" };
-    if (current.status !== "working") return { interrupted: false, status: `cannot interrupt while status is ${current.status}` };
-    const checked = await this.client.getAgent(paneId);
-    if (!checked || checked.status !== "working") return { interrupted: false, status: "already settled" };
-    if (child.sessionPath) {
-      try {
-        child.interruptBaselineMessageIndex = await this.readers.get(child.sessionPath).messageCursor();
-      } catch {
-        child.interruptBaselineMessageIndex = undefined;
+    return this.mutate(paneId, async () => {
+      const current = await this.client.getAgent(paneId);
+      if (!current) throw new Error(`Child Pi is no longer running in ${paneId}`);
+      if (isSettled(current.status)) return { interrupted: false, status: "already settled" };
+      if (current.status === "blocked") return { interrupted: false, status: "blocked; interact with the child pane directly" };
+      if (current.status !== "working") return { interrupted: false, status: `cannot interrupt while status is ${current.status}` };
+      const checked = await this.client.getAgent(paneId);
+      if (!checked || checked.status !== "working") return { interrupted: false, status: "already settled" };
+      if (child.sessionPath) {
+        try {
+          child.interruptBaselineMessageIndex = await this.readers.get(child.sessionPath).messageCursor();
+        } catch {
+          child.interruptBaselineMessageIndex = undefined;
+        }
       }
-    }
-    await this.client.sendEscape(paneId);
-    child.queuedFollowups.length = 0;
-    child.interruptEpisodeSeq = checked.stateChangeSeq ?? child.stateChangeSeq ?? Date.now();
-    return { interrupted: true, status: "Escape sent" };
+      await this.client.sendEscape(paneId);
+      child.queuedFollowups.length = 0;
+      child.interruptEpisodeSeq = checked.stateChangeSeq ?? child.stateChangeSeq ?? Date.now();
+      return { interrupted: true, status: "Escape sent" };
+    });
   }
 
   async getResult(paneId: string): Promise<{
