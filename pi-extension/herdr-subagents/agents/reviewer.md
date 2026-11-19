@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Review code and report actionable correctness findings
-model: openai-codex/gpt-6.1-sol
+model: openai-codex/gpt-6.2-sol
 thinking: high
 placement: tab
 tools: read,bash

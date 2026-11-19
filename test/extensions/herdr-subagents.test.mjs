@@ -231,7 +231,7 @@ test("bundled catalog resolves exactly four adapted roles and model policy", () 
 	assert.equal(catalog.diagnostics.length, 0);
 });
 
-test("bundled defaults and model policy select GPT-6.1 Sol while preserving thinking levels and Luna", () => {
+test("bundled defaults and model policy select GPT-6.2 Sol while preserving thinking levels and Luna", () => {
 	for (const policyPath of [POLICY, join(ROOT, "does-not-exist.json")]) {
 		const catalog = loadAgentCatalog({
 			cwd: ROOT,
@@ -243,7 +243,7 @@ test("bundled defaults and model policy select GPT-6.1 Sol while preserving thin
 			globalAgentsDir: join(ROOT, "does-not-exist"),
 		});
 		for (const [role, thinking] of [["planner", "high"], ["worker", "medium"], ["reviewer", "high"]]) {
-			assert.equal(catalog.get(role).model, "openai-codex/gpt-6.1-sol");
+			assert.equal(catalog.get(role).model, "openai-codex/gpt-6.2-sol");
 			assert.equal(catalog.get(role).thinking, thinking);
 		}
 		assert.equal(catalog.get("explorer").model, "openai-codex/gpt-6-luna");
